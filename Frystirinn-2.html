@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Freezer">
+<meta name="theme-color" content="#0f1923">
+<title>Freezer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  // ══════════════════════════════════════════════
+  // 🔧 STILLINGAR — Fylltu þetta út frá Firebase
+  // Sjá leiðbeiningar í Settings flipanum í appinu
+  // ══════════════════════════════════════════════
+  const FIREBASE_CONFIG = {
+    apiKey: "",
+    authDomain: "",
+    projectId: "",
+    storageBucket: "",
+    messagingSenderId: "",
+    appId: ""
+  };
+
+  // Deilið gögnum undir þessu heiti (breyttu ef þú vilt persónulegt)
+  const SHARED_DOC_ID = "shared";
+
+  let db = null;
+  let unsubscribe = null;
+
+  function isConfigured() {
+    return FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId;
+  }
+
+  window.fbSave = async function(data) {
+    if (!db) return;
+    try {
+      await setDoc(doc(db, "freezer_data", SHARED_DOC_ID), data);
+    } catch(e) { console.error("Firebase save error:", e); }
+  };
+
+  window.fbOnChange = null; // will be set by main script
+
+  window.initFirebase = async function() {
+    if (!isConfigured()) {
+      window.fbStatus = "not_configured";
+      document.dispatchEvent(new Event("fb_ready"));
+      return;
+    }
+    try {
+      const app = initializeApp(FIREBASE_CONFIG);
+      db = getFirestore(app);
+      window.fbStatus = "connected";
+
+      // Listen for real-time changes
+      unsubscribe = onSnapshot(doc(db, "freezer_data", SHARED_DOC_ID), (snap) => {
+        if (snap.exists() && window.fbOnChange) {
+          window.fbOnChange(snap.data());
+        }
+      });
+
+      document.dispatchEvent(new Event("fb_ready"));
+    } catch(e) {
+      console.error("Firebase init error:", e);
+      window.fbStatus = "error";
+      document.dispatchEvent(new Event("fb_ready"));
+    }
+  };
+
+  window.initFirebase();
+</script>
+<style>
+:root {
+  --bg: #0f1923; --bg2: #162030; --bg3: #1d2c3d;
+  --surface: #1a2535; --surface2: #223045;
+  --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.14);
+  --text: #e8f0f8; --text2: #7a9ab8; --text3: #4a6a85;
+  --ice: #5aaee8; --ice-bg: rgba(90,174,232,0.12);
+  --warn: #f0a445; --warn-bg: rgba(240,164,69,0.12);
+  --danger: #e05a5a; --danger-bg: rgba(224,90,90,0.12);
+  --radius: 16px; --radius-sm: 10px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 16px; overflow: hidden; }
+.app { display: flex; flex-direction: column; height: 100%; height: 100dvh; }
+
+.header { padding: calc(var(--safe-top) + 14px) 20px 0; background: var(--bg); flex-shrink: 0; border-bottom: 0.5px solid var(--border); }
+.header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.header-left h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; }
+.header-left .subtitle { font-size: 12px; color: var(--text3); font-family: 'DM Mono', monospace; margin-top: 1px; }
+.header-icon { width: 38px; height: 38px; border-radius: 12px; background: var(--ice-bg); border: 0.5px solid rgba(90,174,232,0.25); display: flex; align-items: center; justify-content: center; font-size: 20px; }
+
+.freezer-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
+.freezer-tabs::-webkit-scrollbar { display: none; }
+.fz-tab { flex-shrink: 0; padding: 8px 16px; border: none; background: none; color: var(--text3); font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.fz-tab.active { color: var(--ice); border-bottom-color: var(--ice); }
+.fz-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.fz-badge { background: var(--danger); color: #fff; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 8px; font-family: 'DM Mono', monospace; }
+.fz-tab-add { flex-shrink: 0; padding: 8px 14px; border: none; background: none; color: var(--text3); font-size: 20px; cursor: pointer; border-bottom: 2px solid transparent; }
+
+.stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; padding: 14px 16px; flex-shrink: 0; }
+.stat { background: var(--surface); border-radius: var(--radius-sm); padding: 12px 10px; text-align: center; border: 0.5px solid var(--border); }
+.stat-num { font-size: 28px; font-weight: 600; line-height: 1; }
+.stat-num.ice { color: var(--ice); } .stat-num.warn { color: var(--warn); } .stat-num.danger { color: var(--danger); }
+.stat-label { font-size: 11px; color: var(--text3); margin-top: 4px; line-height: 1.2; }
+
+.filters { display: flex; gap: 8px; padding: 0 16px 12px; overflow-x: auto; flex-shrink: 0; scrollbar-width: none; }
+.filters::-webkit-scrollbar { display: none; }
+.filter-btn { flex-shrink: 0; padding: 6px 16px; border-radius: 20px; border: 0.5px solid var(--border2); background: none; color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; }
+.filter-btn.active { background: var(--ice); border-color: var(--ice); color: #0f1923; }
+
+.list-wrap { flex: 1; overflow-y: auto; padding: 4px 16px 16px; -webkit-overflow-scrolling: touch; }
+.section-label { font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; font-family: 'DM Mono', monospace; margin: 14px 0 8px; }
+
+.item-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; transition: transform 0.1s; }
+.item-card:active { transform: scale(0.98); }
+.item-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 3px 0 0 3px; }
+.item-card.expired::before { background: var(--danger); }
+.item-card.soon::before { background: var(--warn); }
+.item-card.ok::before { background: var(--ice); }
+
+.item-icon { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+.item-body { flex: 1; min-width: 0; }
+.item-name { font-size: 15px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-sub { font-size: 12px; color: var(--text3); margin-top: 2px; font-family: 'DM Mono', monospace; }
+.progress-bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 7px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 2px; }
+.item-right { flex-shrink: 0; text-align: right; }
+.badge { display: inline-block; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 20px; font-family: 'DM Mono', monospace; }
+.badge.expired { background: var(--danger-bg); color: var(--danger); }
+.badge.soon { background: var(--warn-bg); color: var(--warn); }
+.badge.ok { background: var(--ice-bg); color: var(--ice); }
+.qty-controls { display: flex; gap: 4px; justify-content: flex-end; margin-top: 6px; }
+.qty-btn { width: 26px; height: 26px; border-radius: 8px; border: 0.5px solid var(--border2); background: var(--surface2); color: var(--text2); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.del-btn { position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; border-radius: 50%; border: none; background: transparent; color: var(--text3); font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+
+.empty-msg { text-align: center; padding: 40px 20px; color: var(--text3); font-size: 14px; line-height: 1.6; }
+.empty-msg .big { font-size: 36px; display: block; margin-bottom: 10px; }
+
+.tab-bar { display: flex; background: var(--bg2); border-top: 0.5px solid var(--border); padding-bottom: var(--safe-bottom); flex-shrink: 0; }
+.tab { flex: 1; padding: 10px 0; border: none; background: none; color: var(--text3); font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 500; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.tab.active { color: var(--ice); }
+.tab-icon { font-size: 20px; line-height: 1; }
+
+.screen { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+.screen.active { display: flex; }
+
+.add-scroll { flex: 1; overflow-y: auto; padding: 16px; -webkit-overflow-scrolling: touch; }
+.form-section { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
+.form-section-title { font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; font-family: 'DM Mono', monospace; padding: 12px 16px 8px; }
+.form-row { display: flex; align-items: center; padding: 12px 16px; border-top: 0.5px solid var(--border); gap: 12px; }
+.form-row label { font-size: 14px; color: var(--text); flex: 1; }
+.form-row input, .form-row select { background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 8px; padding: 8px 10px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; text-align: right; width: 140px; -webkit-appearance: none; }
+.form-row input[type="date"] { width: 155px; }
+.form-row input[type="number"] { width: 80px; }
+.form-row input[type="text"] { text-align: left; width: 170px; }
+select option { background: #1d2c3d; }
+.submit-btn { width: 100%; padding: 16px; border-radius: var(--radius); border: none; background: var(--ice); color: #0f1923; font-family: 'DM Sans', sans-serif; font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 8px; }
+.submit-btn:active { opacity: 0.8; }
+
+.settings-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+.settings-section { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-top: 0.5px solid var(--border); font-size: 14px; }
+.settings-row:first-child { border-top: none; }
+.s-label { color: var(--text); } .s-value { color: var(--text2); font-size: 13px; }
+.danger-btn { width: 100%; padding: 14px; border-radius: var(--radius); border: 0.5px solid var(--danger); background: var(--danger-bg); color: var(--danger); font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 6px; }
+.outline-btn { width: 100%; padding: 13px; border-radius: var(--radius); border: 0.5px solid var(--border2); background: transparent; color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 500; cursor: pointer; }
+
+.fz-list-item { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 0.5px solid var(--border); }
+.fz-color-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+.fz-item-name { flex: 1; font-size: 14px; color: var(--text); }
+.fz-item-count { font-size: 12px; color: var(--text3); font-family: 'DM Mono', monospace; margin-right: 4px; }
+.icon-btn { background: none; border: none; color: var(--text3); font-size: 15px; cursor: pointer; padding: 4px 6px; }
+
+.modal-wrap { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 100; align-items: flex-end; }
+.modal-wrap.open { display: flex; }
+.modal { background: var(--bg2); border-radius: 20px 20px 0 0; padding: 20px 20px calc(var(--safe-bottom) + 20px); width: 100%; border-top: 0.5px solid var(--border2); }
+.modal h3 { font-size: 17px; font-weight: 600; margin-bottom: 16px; }
+.modal-input { width: 100%; background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 10px; padding: 12px 14px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 15px; margin-bottom: 14px; }
+.color-picker { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.color-swatch { width: 34px; height: 34px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; transition: border-color 0.15s; }
+.color-swatch.selected { border-color: white; }
+.modal-btns { display: flex; gap: 10px; }
+.modal-btns button { flex: 1; padding: 13px; border-radius: var(--radius-sm); font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 500; cursor: pointer; border: 0.5px solid var(--border2); }
+.btn-confirm { background: var(--ice); color: #0f1923; border-color: var(--ice) !important; }
+.btn-cancel { background: transparent; color: var(--text2); }
+
+.notif { position: fixed; top: calc(var(--safe-top) + 10px); left: 16px; right: 16px; background: var(--surface2); border: 0.5px solid var(--border2); border-radius: var(--radius-sm); padding: 12px 16px; font-size: 14px; color: var(--text); z-index: 200; transform: translateY(-120px); transition: transform 0.3s ease; }
+.notif.show { transform: translateY(0); }
+.shelf-tabs { display: flex; overflow-x: auto; scrollbar-width: none; padding: 0 16px 10px; gap: 8px; flex-shrink: 0; }
+.shelf-tabs::-webkit-scrollbar { display: none; }
+.shelf-tab { flex-shrink: 0; padding: 5px 14px; border-radius: 20px; border: 0.5px solid var(--border2); background: none; color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.shelf-tab.active { background: var(--surface2); border-color: var(--ice); color: var(--ice); }
+.shelf-tab-add { flex-shrink: 0; padding: 5px 12px; border-radius: 20px; border: 0.5px solid var(--border); background: none; color: var(--text3); font-size: 18px; cursor: pointer; line-height: 1; }
+.item-shelf-tag { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; margin-top: 1px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="header">
+    <div class="header-top">
+      <div class="header-left">
+        <h1 id="hdr-title">Freezer</h1>
+        <div class="subtitle" id="hdr-date"></div>
+      </div>
+      <div class="header-icon">❄️</div>
+    </div>
+    <div class="freezer-tabs" id="freezer-tabs"></div>
+  </div>
+
+  <!-- ITEMS SCREEN -->
+  <div class="screen active" id="screen-items">
+    <div class="stats">
+      <div class="stat"><div class="stat-num ice" id="s-total">0</div><div class="stat-label">Stored</div></div>
+      <div class="stat"><div class="stat-num warn" id="s-soon">0</div><div class="stat-label">Use soon</div></div>
+      <div class="stat"><div class="stat-num danger" id="s-old">0</div><div class="stat-label">Too old</div></div>
+    </div>
+    <div class="shelf-tabs" id="shelf-tabs"></div>
+    <div class="filters">
+      <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
+      <button class="filter-btn" onclick="setFilter('expired',this)">Too old</button>
+      <button class="filter-btn" onclick="setFilter('soon',this)">Use soon</button>
+      <button class="filter-btn" onclick="setFilter('ok',this)">Good</button>
+    </div>
+    <div class="list-wrap" id="item-list"></div>
+  </div>
+
+  <!-- ADD SCREEN -->
+  <div class="screen" id="screen-add">
+    <div class="add-scroll">
+      <div class="form-section">
+        <div class="form-section-title">Item details</div>
+        <div class="form-row" style="border-top:none"><label>Name</label><input type="text" id="a-name" placeholder="e.g. Chicken"></div>
+        <div class="form-row"><label>Quantity</label><input type="number" id="a-qty" value="1" min="0" step="0.1"></div>
+        <div class="form-row"><label>Unit</label>
+          <select id="a-unit"><option>pcs</option><option>kg</option><option>g</option><option>L</option><option>ml</option><option>pack</option><option>bag</option></select>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title">Freezer info</div>
+        <div class="form-row" style="border-top:none"><label>Freezer</label><select id="a-freezer" onchange="renderShelfSelect()"></select></div>
+        <div class="form-row"><label>Skúffa / hólf</label><select id="a-shelf"></select></div>
+        <div class="form-row"><label>Category</label>
+          <select id="a-cat" onchange="autoMax()">
+            <option value="meat">Meat & poultry</option><option value="fish">Fish & seafood</option>
+            <option value="veg">Veg & fruit</option><option value="ready">Ready meals</option>
+            <option value="bread">Bread & pastry</option><option value="dairy">Dairy & eggs</option>
+            <option value="leftover">Leftovers</option><option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Frozen on</label><input type="date" id="a-frozen"></div>
+        <div class="form-row"><label>Max storage</label>
+          <select id="a-max">
+            <option value="1">1 month</option><option value="2">2 months</option><option value="3" selected>3 months</option>
+            <option value="6">6 months</option><option value="9">9 months</option><option value="12">12 months</option><option value="18">18 months</option>
+          </select>
+        </div>
+      </div>
+      <button class="submit-btn" onclick="addItem()">Add to freezer</button>
+    </div>
+  </div>
+
+  <!-- SETTINGS SCREEN -->
+  <div class="screen" id="screen-settings">
+    <div class="settings-scroll">
+
+      <div class="settings-section">
+        <div class="form-section-title" style="padding:12px 16px 8px">My freezers</div>
+        <div id="fz-manager"></div>
+        <div style="padding:12px 16px;border-top:0.5px solid var(--border)">
+          <button class="outline-btn" onclick="openModal('add')">+ Add a freezer</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="form-section-title" style="padding:12px 16px 8px">📦 Skúffur / hólf</div>
+        <div id="shelf-manager"></div>
+        <div style="padding:12px 16px;border-top:0.5px solid var(--border)">
+          <button class="outline-btn" onclick="openShelfModal()">+ Bæta við skúffu</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-row" style="border-top:none">
+          <span class="s-label">Warn when</span>
+          <select id="warn-threshold" onchange="savePrefs()" style="background:var(--surface2);border:0.5px solid var(--border2);border-radius:8px;padding:6px 10px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;-webkit-appearance:none">
+            <option value="14">2 weeks left</option><option value="21">3 weeks left</option>
+            <option value="30" selected>1 month left</option><option value="45">6 weeks left</option>
+          </select>
+        </div>
+        <div class="settings-row"><span class="s-label">Total items</span><span class="s-value" id="pref-count">—</span></div>
+        <div class="settings-row"><span class="s-label">Too-old items</span><span class="s-value" id="pref-old" style="color:var(--danger)">0</span></div>
+      </div>
+
+      <div class="settings-section" id="firebase-section">
+        <div class="form-section-title" style="padding:12px 16px 8px">☁️ Skýgeymsla (Firebase)</div>
+        <div class="settings-row" style="border-top:none;flex-direction:column;align-items:flex-start;gap:6px" id="fb-status-row">
+          <span class="s-label" id="fb-status-label">Athugar tengingu…</span>
+          <span class="s-value" style="font-size:12px;line-height:1.6" id="fb-status-desc"></span>
+        </div>
+        <div id="fb-instructions" style="display:none;padding:0 16px 14px;border-top:0.5px solid var(--border)">
+          <div style="font-size:12px;color:var(--text2);line-height:1.8">
+            <b style="color:var(--text)">Hvernig á að tengja Firebase:</b><br>
+            1. Farðu á <b>console.firebase.google.com</b><br>
+            2. Búðu til nýtt verkefni (Add project)<br>
+            3. Veldu <b>Firestore Database</b> → Start in test mode<br>
+            4. Farðu í Project Settings → Your apps → Web app (&lt;/&gt;)<br>
+            5. Afritaðu <b>firebaseConfig</b> gildin<br>
+            6. Opnaðu þennan HTML skrá í textaritli<br>
+            7. Fylltu út <b>FIREBASE_CONFIG</b> efst í skriptunni<br>
+            8. Settu sama skrána upp á báða síma (t.d. í Google Drive)
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="form-section-title" style="padding:12px 16px 8px">Install as app</div>
+        <div class="settings-row" style="border-top:none;flex-direction:column;align-items:flex-start;gap:4px">
+          <span class="s-label">iOS Safari</span>
+          <span class="s-value" style="font-size:12px;line-height:1.5">Tap Share → "Add to Home Screen" → Add</span>
+        </div>
+        <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:4px">
+          <span class="s-label">Android Chrome</span>
+          <span class="s-value" style="font-size:12px;line-height:1.5">Tap ⋮ → "Add to Home screen" → Add</span>
+        </div>
+      </div>
+
+      <button class="danger-btn" onclick="clearCurrent()">Clear current freezer items</button>
+      <button class="danger-btn" style="margin-top:8px" onclick="clearAll()">Clear all freezers</button>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <button class="tab active" id="tab-items" onclick="switchTab('items')"><span class="tab-icon">🧊</span>Freezer</button>
+    <button class="tab" id="tab-add" onclick="switchTab('add')"><span class="tab-icon">＋</span>Add</button>
+    <button class="tab" id="tab-settings" onclick="switchTab('settings')"><span class="tab-icon">⚙️</span>Settings</button>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-wrap" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h3 id="modal-title">New freezer</h3>
+    <input class="modal-input" type="text" id="modal-name" placeholder="e.g. Garage freezer" maxlength="30">
+    <div class="color-picker" id="color-picker"></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-confirm" onclick="confirmModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- SHELF MODAL -->
+<div class="modal-wrap" id="shelf-modal" onclick="if(event.target===this)closeShelfModal()">
+  <div class="modal">
+    <h3 id="shelf-modal-title">Ný skúffa</h3>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:10px" id="shelf-modal-sub"></div>
+    <input class="modal-input" type="text" id="shelf-modal-name" placeholder="t.d. Efsta skúffa" maxlength="30">
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeShelfModal()">Hætta við</button>
+      <button class="btn-confirm" onclick="confirmShelfModal()">Vista</button>
+    </div>
+  </div>
+</div>
+
+<!-- MOVE ITEM MODAL -->
+<div class="modal-wrap" id="move-modal" onclick="if(event.target===this)closeMoveModal()">
+  <div class="modal">
+    <h3>Færa vöru</h3>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:14px" id="move-item-name"></div>
+    <div style="font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;font-family:'DM Mono',monospace;margin-bottom:8px">Frystir</div>
+    <select id="move-freezer" onchange="updateMoveShelfOptions()" style="width:100%;background:var(--surface2);border:0.5px solid var(--border2);border-radius:10px;padding:11px 14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;margin-bottom:14px;-webkit-appearance:none"></select>
+    <div style="font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;font-family:'DM Mono',monospace;margin-bottom:8px">Skúffa / hólf</div>
+    <select id="move-shelf" style="width:100%;background:var(--surface2);border:0.5px solid var(--border2);border-radius:10px;padding:11px 14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;margin-bottom:18px;-webkit-appearance:none"></select>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeMoveModal()">Hætta við</button>
+      <button class="btn-confirm" onclick="confirmMove()">Færa</button>
+    </div>
+  </div>
+</div>
+
+<div class="notif" id="notif"></div>
+
+<script>
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+const CAT_ICONS = {meat:'🥩',fish:'🐟',veg:'🥦',ready:'📦',bread:'🍞',dairy:'🧈',leftover:'🍱',other:'❄️'};
+const CAT_BG = {meat:'rgba(224,90,90,0.15)',fish:'rgba(79,192,141,0.15)',veg:'rgba(79,192,141,0.12)',ready:'rgba(127,119,221,0.15)',bread:'rgba(240,164,69,0.15)',dairy:'rgba(90,174,232,0.12)',leftover:'rgba(211,83,126,0.15)',other:'rgba(90,174,232,0.08)'};
+const CAT_MAX = {meat:6,fish:6,veg:12,ready:3,bread:3,dairy:3,leftover:3,other:6};
+const PALETTE = ['#5aaee8','#4fc08d','#f0a445','#e05a5a','#a78bfa','#f472b6','#34d399','#fb923c','#38bdf8','#e879f9'];
+
+let freezers=[], items=[], shelves=[], prefs={warnDays:30}, activeFreezer=null, activeShelf='all', filter='all';
+let modalMode='add', editingId=null, pickedColor=PALETTE[0];
+let shelfModalMode='add', shelfEditingId=null;
+
+function load() {
+  try { freezers=JSON.parse(localStorage.getItem('fz2_freezers')||'[]'); } catch(e){freezers=[];}
+  try { items=JSON.parse(localStorage.getItem('fz2_items')||'[]'); } catch(e){items=[];}
+  try { shelves=JSON.parse(localStorage.getItem('fz2_shelves')||'[]'); } catch(e){shelves=[];}
+  try { prefs=JSON.parse(localStorage.getItem('fz2_prefs')||'{"warnDays":30}'); } catch(e){}
+  if (!freezers.length) seed();
+  activeFreezer = freezers[0]?.id || null;
+  activeShelf = 'all';
+}
+
+function applyCloudData(data) {
+  if (!data) return;
+  let changed = false;
+  if (data.freezers) { freezers = data.freezers; changed = true; }
+  if (data.items) { items = data.items; changed = true; }
+  if (data.shelves) { shelves = data.shelves; changed = true; }
+  if (data.prefs) { prefs = data.prefs; changed = true; }
+  if (changed) {
+    localStorage.setItem('fz2_freezers', JSON.stringify(freezers));
+    localStorage.setItem('fz2_items', JSON.stringify(items));
+    localStorage.setItem('fz2_shelves', JSON.stringify(shelves));
+    localStorage.setItem('fz2_prefs', JSON.stringify(prefs));
+    if (!activeFreezer || !freezers.find(f=>f.id===activeFreezer)) {
+      activeFreezer = freezers[0]?.id || null;
+    }
+    render();
+    showNotif('☁️ Gögn samstillt!');
+  }
+}
+
+function updateFbStatus() {
+  const lbl = document.getElementById('fb-status-label');
+  const desc = document.getElementById('fb-status-desc');
+  const inst = document.getElementById('fb-instructions');
+  const status = window.fbStatus;
+  if (status === 'connected') {
+    lbl.innerHTML = '🟢 Tengt — gögn samstillist sjálfkrafa';
+    lbl.style.color = 'var(--ice)';
+    desc.textContent = 'Breytingar sjást á öllum tækjum samstundis.';
+    inst.style.display = 'none';
+  } else if (status === 'not_configured') {
+    lbl.innerHTML = '⚙️ Ekki uppsett';
+    lbl.style.color = 'var(--warn)';
+    desc.textContent = 'Gögn eru aðeins vistuð á þessum síma. Sjá leiðbeiningar hér að neðan.';
+    inst.style.display = 'block';
+  } else if (status === 'error') {
+    lbl.innerHTML = '🔴 Villa við tengingu';
+    lbl.style.color = 'var(--danger)';
+    desc.textContent = 'Athugaðu Firebase stillingar og netsamband.';
+    inst.style.display = 'block';
+  } else {
+    lbl.textContent = 'Athugar tengingu…';
+  }
+}
+
+function seed() {
+  freezers=[{id:'fz1',name:'Main freezer',color:'#5aaee8'},{id:'fz2',name:'Garage freezer',color:'#4fc08d'}];
+  const ago=d=>{const dt=new Date(TODAY);dt.setDate(dt.getDate()-d);return dt.toISOString().slice(0,10);};
+  items=[
+    {id:1,name:'Minced beef',qty:500,unit:'g',frozen:ago(210),maxMonths:6,cat:'meat',fzId:'fz1'},
+    {id:2,name:'Salmon fillets',qty:2,unit:'pcs',frozen:ago(40),maxMonths:6,cat:'fish',fzId:'fz1'},
+    {id:3,name:'Frozen peas',qty:800,unit:'g',frozen:ago(60),maxMonths:12,cat:'veg',fzId:'fz1'},
+    {id:4,name:'Chicken thighs',qty:4,unit:'pcs',frozen:ago(150),maxMonths:9,cat:'meat',fzId:'fz2'},
+    {id:5,name:'Lasagne',qty:1,unit:'pcs',frozen:ago(10),maxMonths:3,cat:'ready',fzId:'fz2'},
+    {id:6,name:'Sourdough loaf',qty:1,unit:'pcs',frozen:ago(75),maxMonths:3,cat:'bread',fzId:'fz2'},
+    {id:7,name:'Leftover chilli',qty:2,unit:'pcs',frozen:ago(95),maxMonths:3,cat:'leftover',fzId:'fz1'},
+    {id:8,name:'Edamame beans',qty:400,unit:'g',frozen:ago(20),maxMonths:12,cat:'veg',fzId:'fz2'},
+  ];
+  persist();
+}
+
+function persist() {
+  localStorage.setItem('fz2_freezers',JSON.stringify(freezers));
+  localStorage.setItem('fz2_items',JSON.stringify(items));
+  localStorage.setItem('fz2_shelves',JSON.stringify(shelves));
+  localStorage.setItem('fz2_prefs',JSON.stringify(prefs));
+  if (window.fbSave && window.fbStatus === 'connected') {
+    window.fbSave({ freezers, items, shelves, prefs });
+  }
+}
+
+const daysFrozen=d=>{const f=new Date(d);f.setHours(0,0,0,0);return Math.round((TODAY-f)/86400000);};
+const daysLeft=i=>(i.maxMonths*30)-daysFrozen(i.frozen);
+const pct=i=>Math.min(100,Math.round((daysFrozen(i.frozen)/(i.maxMonths*30))*100));
+function statusOf(i){const d=daysLeft(i);return d<0?'expired':d<=prefs.warnDays?'soon':'ok';}
+function fmtLeft(i){const d=daysLeft(i);if(d<0)return 'Expired '+Math.abs(d)+'d ago';if(d<30)return d+'d left';return Math.round(d/30)+' mo left';}
+function fmtSub(i){const df=daysFrozen(i.frozen);const m=Math.floor(df/30),d=df%30;return 'Frozen '+(m>0?m+'mo '+d+'d':d+'d')+' · '+parseFloat(i.qty.toFixed(2))+' '+i.unit;}
+const curFz=()=>freezers.find(f=>f.id===activeFreezer);
+const curShelves=()=>shelves.filter(s=>s.fzId===activeFreezer);
+const curItems=()=>{
+  const mine=items.filter(i=>i.fzId===activeFreezer);
+  if(activeShelf==='all') return mine;
+  if(activeShelf==='none') return mine.filter(i=>!i.shelfId);
+  return mine.filter(i=>i.shelfId===activeShelf);
+};
+
+function renderShelfTabs() {
+  const sh = curShelves();
+  const allCount = items.filter(i=>i.fzId===activeFreezer).length;
+  let html = `<button class="shelf-tab${activeShelf==='all'?' active':''}" onclick="selectShelf('all')">Allt (${allCount})</button>`;
+  sh.forEach(s=>{
+    const n=items.filter(i=>i.fzId===activeFreezer&&i.shelfId===s.id).length;
+    html+=`<button class="shelf-tab${activeShelf===s.id?' active':''}" onclick="selectShelf('${s.id}')">${s.name} (${n})</button>`;
+  });
+  html+=`<button class="shelf-tab-add" onclick="openShelfModal()" title="Bæta við skúffu">＋</button>`;
+  document.getElementById('shelf-tabs').innerHTML=html;
+}
+
+function renderShelfManager() {
+  const el = document.getElementById('shelf-manager');
+  if(!el) return;
+  const fz = curFz();
+  const fzShelves = shelves.filter(s=>s.fzId===activeFreezer);
+  if(!fzShelves.length){
+    el.innerHTML='<div style="padding:12px 16px;font-size:13px;color:var(--text3)">Engar skúffur í '+(fz?.name||'þessum frystir')+'.</div>';
+    return;
+  }
+  el.innerHTML = fzShelves.map(s=>{
+    const n=items.filter(i=>i.shelfId===s.id).length;
+    return `<div class="fz-list-item">
+      <span style="font-size:18px">📦</span>
+      <span class="fz-item-name">${s.name} <span style="font-size:11px;color:var(--text3)">(${fz?.name})</span></span>
+      <span class="fz-item-count">${n} vara${n!==1?'r':''}</span>
+      <button class="icon-btn" onclick="openShelfModal('${s.id}')" title="Breyta">✏️</button>
+      <button class="icon-btn" onclick="deleteShelf('${s.id}')" title="Eyða" style="color:var(--danger)">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function renderShelfSelect() {
+  const fzId = document.getElementById('a-freezer').value || activeFreezer;
+  const fzShelves = shelves.filter(s=>s.fzId===fzId);
+  const sel = document.getElementById('a-shelf');
+  sel.innerHTML = '<option value="">— Engin skúffa —</option>' +
+    fzShelves.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+}
+
+function selectShelf(id){activeShelf=id;render();}
+
+function openShelfModal(editId) {
+  shelfModalMode = editId ? 'edit' : 'add';
+  shelfEditingId = editId || null;
+  const fz = curFz();
+  if(shelfModalMode==='edit'){
+    const s=shelves.find(x=>x.id===editId);
+    document.getElementById('shelf-modal-title').textContent='Breyta skúffu';
+    document.getElementById('shelf-modal-sub').textContent=fz?.name||'';
+    document.getElementById('shelf-modal-name').value=s?.name||'';
+  } else {
+    document.getElementById('shelf-modal-title').textContent='Ný skúffa';
+    document.getElementById('shelf-modal-sub').textContent='Í: '+(fz?.name||'');
+    document.getElementById('shelf-modal-name').value='';
+  }
+  document.getElementById('shelf-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('shelf-modal-name').focus(),100);
+}
+function closeShelfModal(){document.getElementById('shelf-modal').classList.remove('open');}
+function confirmShelfModal(){
+  const name=document.getElementById('shelf-modal-name').value.trim();
+  if(!name)return;
+  if(shelfModalMode==='add'){
+    shelves.push({id:'sh'+Date.now(),name,fzId:activeFreezer});
+    showNotif('Skúffu bætt við!');
+  } else {
+    const s=shelves.find(x=>x.id===shelfEditingId);
+    if(s) s.name=name;
+    showNotif('Uppfært!');
+  }
+  closeShelfModal(); persist(); render();
+}
+function deleteShelf(id){
+  const s=shelves.find(x=>x.id===id);
+  const n=items.filter(i=>i.shelfId===id).length;
+  if(!confirm('Eyða "'+s?.name+'"'+(n?' og taka '+n+' vör'+( n!==1?'ur':'')+' úr skúffu':'')+' ?'))return;
+  shelves=shelves.filter(x=>x.id!==id);
+  items.forEach(i=>{if(i.shelfId===id)i.shelfId=null;});
+  if(activeShelf===id) activeShelf='all';
+  persist(); render();
+}
+
+function renderTabs() {
+  document.getElementById('freezer-tabs').innerHTML =
+    freezers.map(fz=>{
+      const old=items.filter(i=>i.fzId===fz.id&&statusOf(i)==='expired').length;
+      return `<button class="fz-tab${fz.id===activeFreezer?' active':''}" onclick="selectFz('${fz.id}')">
+        <span class="fz-dot" style="background:${fz.color}"></span>${fz.name}
+        ${old?`<span class="fz-badge">${old}</span>`:''}
+      </button>`;
+    }).join('')+
+    `<button class="fz-tab-add" onclick="openModal('add')" title="Add freezer">＋</button>`;
+}
+
+function renderManager() {
+  document.getElementById('fz-manager').innerHTML = freezers.map(fz=>{
+    const n=items.filter(i=>i.fzId===fz.id).length;
+    const canDel=freezers.length>1;
+    return `<div class="fz-list-item">
+      <div class="fz-color-dot" style="background:${fz.color}"></div>
+      <span class="fz-item-name">${fz.name}</span>
+      <span class="fz-item-count">${n} item${n!==1?'s':''}</span>
+      <button class="icon-btn" onclick="openModal('edit','${fz.id}')" title="Edit">✏️</button>
+      ${canDel?`<button class="icon-btn" onclick="deleteFz('${fz.id}')" title="Delete" style="color:var(--danger)">✕</button>`:''}
+    </div>`;
+  }).join('');
+}
+
+function renderFreezerSelect() {
+  document.getElementById('a-freezer').innerHTML = freezers.map(fz=>
+    `<option value="${fz.id}"${fz.id===activeFreezer?' selected':''}>${fz.name}</option>`
+  ).join('');
+  renderShelfSelect();
+}
+
+function render() {
+  const fz=curFz();
+  document.getElementById('hdr-date').textContent=TODAY.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+  document.getElementById('hdr-title').textContent=fz?.name||'Freezer';
+
+  const mine=curItems();
+  const exp=mine.filter(i=>statusOf(i)==='expired').length;
+  const soon=mine.filter(i=>statusOf(i)==='soon').length;
+  document.getElementById('s-total').textContent=mine.length;
+  document.getElementById('s-soon').textContent=soon;
+  document.getElementById('s-old').textContent=exp;
+  document.getElementById('pref-count').textContent=items.length+' items, '+freezers.length+' freezer'+(freezers.length!==1?'s':'');
+  document.getElementById('pref-old').textContent=items.filter(i=>statusOf(i)==='expired').length;
+
+  let vis=[...mine];
+  if(filter==='expired') vis=mine.filter(i=>statusOf(i)==='expired');
+  else if(filter==='soon') vis=mine.filter(i=>statusOf(i)==='soon');
+  else if(filter==='ok') vis=mine.filter(i=>statusOf(i)==='ok');
+  vis.sort((a,b)=>daysLeft(a)-daysLeft(b));
+
+  const list=document.getElementById('item-list');
+  if(!vis.length){list.innerHTML='<div class="empty-msg"><span class="big">🧊</span>No items here.<br>Tap + to add something.</div>';return;}
+
+  const grp={expired:[],soon:[],ok:[]};
+  vis.forEach(i=>grp[statusOf(i)].push(i));
+  const sec=(lbl,arr)=>arr.length?`<div class="section-label">${lbl}</div>`+arr.map(cardHtml).join(''):'';
+  list.innerHTML=sec('Too old — use or discard',grp.expired)+sec('Use within a month',grp.soon)+(grp.expired.length||grp.soon.length?sec('All good',grp.ok):grp.ok.map(cardHtml).join(''));
+
+  renderTabs(); renderManager(); renderFreezerSelect(); renderShelfTabs(); renderShelfManager(); renderShelfSelect();
+}
+
+function cardHtml(i) {
+  const s=statusOf(i),p=pct(i);
+  const bar=s==='expired'?'#e05a5a':s==='soon'?'#f0a445':'#5aaee8';
+  const shelf=i.shelfId?shelves.find(x=>x.id===i.shelfId):null;
+  return `<div class="item-card ${s}">
+    <div class="item-icon" style="background:${CAT_BG[i.cat]||'rgba(90,174,232,0.08)'}">${CAT_ICONS[i.cat]||'❄️'}</div>
+    <div class="item-body">
+      <div class="item-name">${i.name}</div>
+      <div class="item-sub">${fmtSub(i)}</div>
+      ${shelf?`<div class="item-shelf-tag" style="cursor:pointer" onclick="openMoveModal(${i.id})">📦 ${shelf.name} ✎</div>`:`<div class="item-shelf-tag" style="cursor:pointer;color:var(--text3)" onclick="openMoveModal(${i.id})">📦 Engin skúffa ✎</div>`}
+      <div class="progress-bar"><div class="progress-fill" style="width:${p}%;background:${bar}"></div></div>
+    </div>
+    <div class="item-right">
+      <div class="badge ${s}">${s==='expired'?'Too old':fmtLeft(i)}</div>
+      <div class="qty-controls">
+        <button class="qty-btn" onclick="adj(${i.id},-1)">−</button>
+        <button class="qty-btn" onclick="adj(${i.id},1)">+</button>
+      </div>
+    </div>
+    <button class="del-btn" onclick="del(${i.id})">✕</button>
+  </div>`;
+}
+
+function adj(id,delta){const i=items.find(x=>x.id===id);if(!i)return;i.qty=Math.max(0,parseFloat((i.qty+delta).toFixed(2)));persist();render();}
+function del(id){items=items.filter(x=>x.id!==id);persist();render();}
+
+let movingItemId = null;
+function openMoveModal(id) {
+  movingItemId = id;
+  const item = items.find(x=>x.id===id);
+  if(!item) return;
+  document.getElementById('move-item-name').textContent = item.name;
+  // Populate freezer select
+  document.getElementById('move-freezer').innerHTML = freezers.map(fz=>
+    `<option value="${fz.id}"${fz.id===item.fzId?' selected':''}>${fz.name}</option>`
+  ).join('');
+  updateMoveShelfOptions(item.shelfId);
+  document.getElementById('move-modal').classList.add('open');
+}
+function updateMoveShelfOptions(currentShelfId) {
+  const fzId = document.getElementById('move-freezer').value;
+  const fzShelves = shelves.filter(s=>s.fzId===fzId);
+  const item = items.find(x=>x.id===movingItemId);
+  const sel = currentShelfId !== undefined ? currentShelfId : (item?.shelfId||'');
+  document.getElementById('move-shelf').innerHTML =
+    '<option value="">— Engin skúffa —</option>' +
+    fzShelves.map(s=>`<option value="${s.id}"${s.id===sel?' selected':''}>${s.name}</option>`).join('');
+}
+function closeMoveModal(){document.getElementById('move-modal').classList.remove('open');movingItemId=null;}
+function confirmMove(){
+  const item=items.find(x=>x.id===movingItemId);
+  if(!item)return;
+  const newFzId=document.getElementById('move-freezer').value;
+  const newShelfId=document.getElementById('move-shelf').value||null;
+  item.fzId=newFzId;
+  item.shelfId=newShelfId;
+  closeMoveModal();
+  persist();
+  const fzName=freezers.find(f=>f.id===newFzId)?.name||'';
+  const shName=newShelfId?shelves.find(s=>s.id===newShelfId)?.name:'';
+  showNotif('Fært í '+(shName?shName+', ':'')+fzName+'!');
+  render();
+}
+function setFilter(f,btn){filter=f;document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');render();}
+function selectFz(id){activeFreezer=id;activeShelf='all';filter='all';document.querySelectorAll('.filter-btn').forEach((b,i)=>b.classList.toggle('active',i===0));render();}
+function autoMax(){document.getElementById('a-max').value=CAT_MAX[document.getElementById('a-cat').value]||3;}
+
+function addItem(){
+  const name=document.getElementById('a-name').value.trim();
+  if(!name){document.getElementById('a-name').focus();return;}
+  const fzId=document.getElementById('a-freezer').value;
+  const shelfId=document.getElementById('a-shelf').value||null;
+  items.push({id:Date.now(),name,qty:parseFloat(document.getElementById('a-qty').value)||1,unit:document.getElementById('a-unit').value,cat:document.getElementById('a-cat').value,frozen:document.getElementById('a-frozen').value||TODAY.toISOString().slice(0,10),maxMonths:parseInt(document.getElementById('a-max').value)||3,fzId,shelfId});
+  persist();
+  document.getElementById('a-name').value='';document.getElementById('a-qty').value='1';
+  activeFreezer=fzId;
+  showNotif('Added to '+freezers.find(f=>f.id===fzId)?.name+'!');
+  switchTab('items');render();
+}
+
+function clearCurrent(){const fz=curFz();if(confirm('Remove all items from '+fz?.name+'?')){items=items.filter(i=>i.fzId!==activeFreezer);persist();render();}}
+function clearAll(){if(confirm('Remove ALL items from ALL freezers?')){items=[];persist();render();}}
+
+/* Modal */
+function buildSwatches(){
+  document.getElementById('color-picker').innerHTML=PALETTE.map(c=>
+    `<div class="color-swatch${c===pickedColor?' selected':''}" style="background:${c}" onclick="pickColor('${c}',this)"></div>`
+  ).join('');
+}
+function pickColor(c,el){pickedColor=c;document.querySelectorAll('.color-swatch').forEach(s=>s.classList.remove('selected'));el.classList.add('selected');}
+
+function openModal(mode,id){
+  modalMode=mode; editingId=id||null;
+  if(mode==='edit'){
+    const fz=freezers.find(f=>f.id===id);
+    pickedColor=fz.color;
+    document.getElementById('modal-title').textContent='Edit freezer';
+    document.getElementById('modal-name').value=fz.name;
+  } else {
+    pickedColor=PALETTE[freezers.length%PALETTE.length];
+    document.getElementById('modal-title').textContent='New freezer';
+    document.getElementById('modal-name').value='';
+  }
+  buildSwatches();
+  document.getElementById('modal').classList.add('open');
+  setTimeout(()=>document.getElementById('modal-name').focus(),100);
+}
+function closeModal(){document.getElementById('modal').classList.remove('open');}
+function confirmModal(){
+  const name=document.getElementById('modal-name').value.trim();
+  if(!name)return;
+  if(modalMode==='add'){
+    const id='fz'+Date.now();
+    freezers.push({id,name,color:pickedColor});
+    activeFreezer=id;
+    showNotif('Freezer added!');
+  } else {
+    const fz=freezers.find(f=>f.id===editingId);
+    if(fz){fz.name=name;fz.color=pickedColor;}
+    showNotif('Updated!');
+  }
+  closeModal();persist();render();
+}
+function deleteFz(id){
+  const fz=freezers.find(f=>f.id===id);
+  const n=items.filter(i=>i.fzId===id).length;
+  if(!confirm('Delete "'+fz?.name+'"'+(n?' and its '+n+' item'+(n!==1?'s':''):'')+' ?'))return;
+  freezers=freezers.filter(f=>f.id!==id);
+  items=items.filter(i=>i.fzId!==id);
+  if(activeFreezer===id)activeFreezer=freezers[0]?.id||null;
+  persist();render();
+}
+
+function switchTab(tab){
+  ['items','add','settings'].forEach(t=>{
+    document.getElementById('screen-'+t).classList.toggle('active',t===tab);
+    document.getElementById('tab-'+t).classList.toggle('active',t===tab);
+  });
+  if(tab==='add')renderFreezerSelect();
+  if(tab==='settings')updateFbStatus();
+}
+function savePrefs(){prefs.warnDays=parseInt(document.getElementById('warn-threshold').value);persist();render();}
+function showNotif(msg){const n=document.getElementById('notif');n.textContent=msg;n.classList.add('show');setTimeout(()=>n.classList.remove('show'),2200);}
+
+document.getElementById('a-frozen').value=TODAY.toISOString().slice(0,10);
+document.getElementById('a-frozen').max=TODAY.toISOString().slice(0,10);
+load();
+document.getElementById('warn-threshold').value=prefs.warnDays;
+render();
+
+// Wait for Firebase module to initialize
+document.addEventListener('fb_ready', () => {
+  updateFbStatus();
+  // Hook up real-time listener so changes from other devices appear instantly
+  window.fbOnChange = applyCloudData;
+});
+</script>
+</body>
+</html>

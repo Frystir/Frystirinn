@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Freezer">
+<meta name="theme-color" content="#0f1923">
+<title>Freezer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  // ══════════════════════════════════════════════
+  // 🔧 STILLINGAR — Fylltu þetta út frá Firebase
+  // Sjá leiðbeiningar í Settings flipanum í appinu
+  // ══════════════════════════════════════════════
+  const FIREBASE_CONFIG = {
+    apiKey: "",
+    authDomain: "",
+    projectId: "",
+    storageBucket: "",
+    messagingSenderId: "",
+    appId: ""
+  };
+
+  // Deilið gögnum undir þessu heiti (breyttu ef þú vilt persónulegt)
+  const SHARED_DOC_ID = "shared";
+
+  let db = null;
+  let unsubscribe = null;
+
+  function isConfigured() {
+    return FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.projectId;
+  }
+
+  window.fbSave = async function(data) {
+    if (!db) return;
+    try {
+      await setDoc(doc(db, "freezer_data", SHARED_DOC_ID), data);
+    } catch(e) { console.error("Firebase save error:", e); }
+  };
+
+  window.fbOnChange = null; // will be set by main script
+
+  window.initFirebase = async function() {
+    if (!isConfigured()) {
+      window.fbStatus = "not_configured";
+      document.dispatchEvent(new Event("fb_ready"));
+      return;
+    }
+    try {
+      const app = initializeApp(FIREBASE_CONFIG);
+      db = getFirestore(app);
+      window.fbStatus = "connected";
+
+      // Listen for real-time changes
+      unsubscribe = onSnapshot(doc(db, "freezer_data", SHARED_DOC_ID), (snap) => {
+        if (snap.exists() && window.fbOnChange) {
+          window.fbOnChange(snap.data());
+        }
+      });
+
+      document.dispatchEvent(new Event("fb_ready"));
+    } catch(e) {
+      console.error("Firebase init error:", e);
+      window.fbStatus = "error";
+      document.dispatchEvent(new Event("fb_ready"));
+    }
+  };
+
+  window.initFirebase();
+</script>
+<style>
+:root {
+  --bg: #0f1923; --bg2: #162030; --bg3: #1d2c3d;
+  --surface: #1a2535; --surface2: #223045;
+  --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.14);
+  --text: #e8f0f8; --text2: #7a9ab8; --text3: #4a6a85;
+  --ice: #5aaee8; --ice-bg: rgba(90,174,232,0.12);
+  --warn: #f0a445; --warn-bg: rgba(240,164,69,0.12);
+  --danger: #e05a5a; --danger-bg: rgba(224,90,90,0.12);
+  --radius: 16px; --radius-sm: 10px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 16px; overflow: hidden; }
+.app { display: flex; flex-direction: column; height: 100%; height: 100dvh; }
+
+.header { padding: calc(var(--safe-top) + 14px) 20px 0; background: var(--bg); flex-shrink: 0; border-bottom: 0.5px solid var(--border); }
+.header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.header-left h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.5px; }
+.header-left .subtitle { font-size: 12px; color: var(--text3); font-family: 'DM Mono', monospace; margin-top: 1px; }
+.header-icon { width: 38px; height: 38px; border-radius: 12px; background: var(--ice-bg); border: 0.5px solid rgba(90,174,232,0.25); display: flex; align-items: center; justify-content: center; font-size: 20px; }
+
+.freezer-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
+.freezer-tabs::-webkit-scrollbar { display: none; }
+.fz-tab { flex-shrink: 0; padding: 8px 16px; border: none; background: none; color: var(--text3); font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.fz-tab.active { color: var(--ice); border-bottom-color: var(--ice); }
+.fz-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.fz-badge { background: var(--danger); color: #fff; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 8px; font-family: 'DM Mono', monospace; }
+.fz-tab-add { flex-shrink: 0; padding: 8px 14px; border: none; background: none; color: var(--text3); font-size: 20px; cursor: pointer; border-bottom: 2px solid transparent; }
+
+.stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; padding: 14px 16px; flex-shrink: 0; }
+.stat { background: var(--surface); border-radius: var(--radius-sm); padding: 12px 10px; text-align: center; border: 0.5px solid var(--border); }
+.stat-num { font-size: 28px; font-weight: 600; line-height: 1; }
+.stat-num.ice { color: var(--ice); } .stat-num.warn { color: var(--warn); } .stat-num.danger { color: var(--danger); }
+.stat-label { font-size: 11px; color: var(--text3); margin-top: 4px; line-height: 1.2; }
+
+.filters { display: flex; gap: 8px; padding: 0 16px 12px; overflow-x: auto; flex-shrink: 0; scrollbar-width: none; }
+.filters::-webkit-scrollbar { display: none; }
+.filter-btn { flex-shrink: 0; padding: 6px 16px; border-radius: 20px; border: 0.5px solid var(--border2); background: none; color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; }
+.filter-btn.active { background: var(--ice); border-color: var(--ice); color: #0f1923; }
+
+.list-wrap { flex: 1; overflow-y: auto; padding: 4px 16px 16px; -webkit-overflow-scrolling: touch; }
+.section-label { font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; font-family: 'DM Mono', monospace; margin: 14px 0 8px; }
+
+.item-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; transition: transform 0.1s; }
+.item-card:active { transform: scale(0.98); }
+.item-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 3px 0 0 3px; }
+.item-card.expired::before { background: var(--danger); }
+.item-card.soon::before { background: var(--warn); }
+.item-card.ok::before { background: var(--ice); }
+
+.item-icon { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+.item-body { flex: 1; min-width: 0; }
+.item-name { font-size: 15px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-sub { font-size: 12px; color: var(--text3); margin-top: 2px; font-family: 'DM Mono', monospace; }
+.progress-bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 7px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 2px; }
+.item-right { flex-shrink: 0; text-align: right; }
+.badge { display: inline-block; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 20px; font-family: 'DM Mono', monospace; }
+.badge.expired { background: var(--danger-bg); color: var(--danger); }
+.badge.soon { background: var(--warn-bg); color: var(--warn); }
+.badge.ok { background: var(--ice-bg); color: var(--ice); }
+.qty-controls { display: flex; gap: 4px; justify-content: flex-end; margin-top: 6px; }
+.qty-btn { width: 26px; height: 26px; border-radius: 8px; border: 0.5px solid var(--border2); background: var(--surface2); color: var(--text2); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.del-btn { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 50%; border: none; background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; }
+.edit-btn { position: absolute; top: 8px; right: 34px; width: 22px; height: 22px; border-radius: 50%; border: none; background: var(--surface2); color: var(--text2); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+
+.empty-msg { text-align: center; padding: 40px 20px; color: var(--text3); font-size: 14px; line-height: 1.6; }
+.empty-msg .big { font-size: 36px; display: block; margin-bottom: 10px; }
+
+.tab-bar { display: flex; background: var(--bg2); border-top: 0.5px solid var(--border); padding-bottom: var(--safe-bottom); flex-shrink: 0; }
+.tab { flex: 1; padding: 10px 0; border: none; background: none; color: var(--text3); font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 500; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.tab.active { color: var(--ice); }
+.tab-icon { font-size: 20px; line-height: 1; }
+
+.screen { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+.screen.active { display: flex; }
+
+.add-scroll { flex: 1; overflow-y: auto; padding: 16px; -webkit-overflow-scrolling: touch; }
+.form-section { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
+.form-section-title { font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; font-family: 'DM Mono', monospace; padding: 12px 16px 8px; }
+.form-row { display: flex; align-items: center; padding: 12px 16px; border-top: 0.5px solid var(--border); gap: 12px; }
+.form-row label { font-size: 14px; color: var(--text); flex: 1; }
+.form-row input, .form-row select { background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 8px; padding: 8px 10px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; text-align: right; width: 140px; -webkit-appearance: none; }
+.form-row input[type="date"] { width: 155px; }
+.form-row input[type="number"] { width: 80px; }
+.form-row input[type="text"] { text-align: left; width: 170px; }
+select option { background: #1d2c3d; }
+.submit-btn { width: 100%; padding: 16px; border-radius: var(--radius); border: none; background: var(--ice); color: #0f1923; font-family: 'DM Sans', sans-serif; font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 8px; }
+.submit-btn:active { opacity: 0.8; }
+
+.settings-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+.settings-section { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-top: 0.5px solid var(--border); font-size: 14px; }
+.settings-row:first-child { border-top: none; }
+.s-label { color: var(--text); } .s-value { color: var(--text2); font-size: 13px; }
+.danger-btn { width: 100%; padding: 14px; border-radius: var(--radius); border: 0.5px solid var(--danger); background: var(--danger-bg); color: var(--danger); font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 6px; }
+.outline-btn { width: 100%; padding: 13px; border-radius: var(--radius); border: 0.5px solid var(--border2); background: transparent; color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 500; cursor: pointer; }
+
+.fz-list-item { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 0.5px solid var(--border); }
+.fz-color-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+.fz-item-name { flex: 1; font-size: 14px; color: var(--text); }
+.fz-item-count { font-size: 12px; color: var(--text3); font-family: 'DM Mono', monospace; margin-right: 4px; }
+.icon-btn { background: none; border: none; color: var(--text3); font-size: 15px; cursor: pointer; padding: 4px 6px; }
+
+.modal-wrap { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 100; align-items: flex-end; }
+.modal-wrap.open { display: flex; }
+.modal { background: var(--bg2); border-radius: 20px 20px 0 0; padding: 20px 20px calc(var(--safe-bottom) + 20px); width: 100%; border-top: 0.5px solid var(--border2); }
+.modal h3 { font-size: 17px; font-weight: 600; margin-bottom: 16px; }
+.modal-input { width: 100%; background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 10px; padding: 12px 14px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 15px; margin-bottom: 14px; }
+.color-picker { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.color-swatch { width: 34px; height: 34px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; transition: border-color 0.15s; }
+.color-swatch.selected { border-color: white; }
+.modal-btns { display: flex; gap: 10px; }
+.modal-btns button { flex: 1; padding: 13px; border-radius: var(--radius-sm); font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 500; cursor: pointer; border: 0.5px solid var(--border2); }
+.btn-confirm { background: var(--ice); color: #0f1923; border-color: var(--ice) !important; }
+.btn-cancel { background: transparent; color: var(--text2); }
+
+.notif { position: fixed; top: calc(var(--safe-top) + 10px); left: 16px; right: 16px; background: var(--surface2); border: 0.5px solid var(--border2); border-radius: var(--radius-sm); padding: 12px 16px; font-size: 14px; color: var(--text); z-index: 200; transform: translateY(-120px); transition: transform 0.3s ease; }
+.notif.show { transform: translateY(0); }
+.shelf-tabs { display: flex; overflow-x: auto; scrollbar-width: none; padding: 0 16px 10px; gap: 8px; flex-shrink: 0; }
+.shelf-tabs::-webkit-scrollbar { display: none; }
+.shelf-tab { flex-shrink: 0; padding: 5px 14px; border-radius: 20px; border: 0.5px solid var(--border2); background: none; color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.shelf-tab.active { background: var(--surface2); border-color: var(--ice); color: var(--ice); }
+.shelf-tab-add { flex-shrink: 0; padding: 5px 12px; border-radius: 20px; border: 0.5px solid var(--border); background: none; color: var(--text3); font-size: 18px; cursor: pointer; line-height: 1; }
+.item-shelf-tag { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; margin-top: 1px; }
+.edit-item-btn { position: absolute; bottom: 10px; right: 10px; background: none; border: none; color: var(--text3); font-size: 14px; cursor: pointer; padding: 2px 5px; }
+.modal-label { font-size: 11px; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; font-family: 'DM Mono', monospace; margin-bottom: 6px; margin-top: 12px; }
+.modal-label:first-of-type { margin-top: 0; }
+.modal-input-row { display: flex; gap: 8px; margin-bottom: 4px; }
+.modal-input-row input, .modal-input-row select { flex: 1; background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 10px; padding: 10px 12px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; -webkit-appearance: none; }
+.modal-input-row input[type="number"] { flex: 0 0 80px; }
+.cat-emoji-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.cat-emoji-opt { width: 40px; height: 40px; border-radius: 10px; border: 0.5px solid var(--border2); background: var(--surface2); font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.cat-emoji-opt.selected { border-color: var(--ice); background: var(--ice-bg); }
+.cat-list-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 0.5px solid var(--border); }
+.cat-emoji { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.cat-item-name { flex: 1; font-size: 14px; color: var(--text); }
+.search-wrap { padding: 0 16px 10px; }
+.search-input { width: 100%; background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 12px; padding: 10px 14px 10px 36px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; box-sizing: border-box; outline: none; }
+.search-input:focus { border-color: var(--ice); }
+.search-icon { position: absolute; left: 26px; top: 50%; transform: translateY(-50%); font-size: 15px; pointer-events: none; opacity: 0.5; }
+.search-clear { position: absolute; right: 26px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text3); font-size: 16px; cursor: pointer; padding: 2px 4px; display: none; }
+.search-box { position: relative; }
+.cat-filter-row { display: flex; overflow-x: auto; scrollbar-width: none; gap: 6px; padding: 0 16px 10px; flex-shrink: 0; }
+.cat-filter-row::-webkit-scrollbar { display: none; }
+.cat-filter-btn { flex-shrink: 0; padding: 4px 12px; border-radius: 20px; border: 0.5px solid var(--border2); background: none; color: var(--text2); font-family: 'DM Sans', sans-serif; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.cat-filter-btn.active { background: var(--surface2); border-color: var(--ice); color: var(--ice); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="header">
+    <div class="header-top">
+      <div class="header-left">
+        <h1 id="hdr-title">Freezer</h1>
+        <div class="subtitle" id="hdr-date"></div>
+      </div>
+      <div class="header-icon">❄️</div>
+    </div>
+    <div class="freezer-tabs" id="freezer-tabs"></div>
+  </div>
+
+  <!-- ITEMS SCREEN -->
+  <div class="screen active" id="screen-items">
+    <div class="stats">
+      <div class="stat"><div class="stat-num ice" id="s-total">0</div><div class="stat-label" id="lbl-stored">Í geymslu</div></div>
+      <div class="stat"><div class="stat-num warn" id="s-soon">0</div><div class="stat-label" id="lbl-soon">Nota fljótt</div></div>
+      <div class="stat"><div class="stat-num danger" id="s-old">0</div><div class="stat-label" id="lbl-old-stat">Of gamalt</div></div>
+    </div>
+    <div class="shelf-tabs" id="shelf-tabs"></div>
+    <div class="filters">
+      <button class="filter-btn active" id="fbtn-all" onclick="setFilter('all',this)">Allt</button>
+      <button class="filter-btn" id="fbtn-expired" onclick="setFilter('expired',this)">Of gamalt</button>
+      <button class="filter-btn" id="fbtn-soon" onclick="setFilter('soon',this)">Nota fljótt</button>
+      <button class="filter-btn" id="fbtn-ok" onclick="setFilter('ok',this)">Í lagi</button>
+    </div>
+    <div class="search-wrap">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input class="search-input" id="search-input" type="text" placeholder="Leita…" oninput="onSearch(this.value)" autocomplete="off" autocorrect="off" spellcheck="false">
+        <button class="search-clear" id="search-clear" onclick="clearSearch()">✕</button>
+      </div>
+    </div>
+    <div class="cat-filter-row" id="cat-filter-row"></div>
+    <div class="list-wrap" id="item-list"></div>
+  </div>
+
+  <!-- ADD SCREEN -->
+  <div class="screen" id="screen-add">
+    <div class="add-scroll">
+      <div class="form-section">
+        <div class="form-section-title" id="lbl-add-title">Vöruupplýsingar</div>
+        <div class="form-row" style="border-top:none"><label id="lbl-a-name">Nafn</label><input type="text" id="a-name" placeholder="t.d. Kjúklingur"></div>
+        <div class="form-row"><label id="lbl-a-qty">Magn</label><input type="number" id="a-qty" value="1" min="0" step="0.1"></div>
+        <div class="form-row"><label id="lbl-a-unit">Eining</label>
+          <select id="a-unit"><option>pcs</option><option>kg</option><option>g</option><option>L</option><option>ml</option><option>pack</option><option>bag</option></select>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title" id="lbl-add-fz-title">Frystir</div>
+        <div class="form-row" style="border-top:none"><label id="lbl-a-freezer">Frystir</label><select id="a-freezer" onchange="renderShelfSelect()"></select></div>
+        <div class="form-row"><label id="lbl-a-shelf">Skúffa / hólf</label><select id="a-shelf"></select></div>
+        <div class="form-row"><label id="lbl-a-cat">Flokkur</label>
+          <select id="a-cat" onchange="autoMax()">
+            <option value="meat">Meat & poultry</option><option value="fish">Fish & seafood</option>
+            <option value="veg">Veg & fruit</option><option value="ready">Ready meals</option>
+            <option value="bread">Bread & pastry</option><option value="dairy">Dairy & eggs</option>
+            <option value="leftover">Leftovers</option><option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-row"><label id="lbl-a-frozen">Fryst þann</label><input type="date" id="a-frozen"></div>
+        <div class="form-row"><label id="lbl-a-max">Hámarks geymsla</label>
+          <select id="a-max">
+            <option value="1" id="amax-1">1 mánuður</option><option value="2" id="amax-2">2 mánuðir</option><option value="3" id="amax-3" selected>3 mánuðir</option>
+            <option value="6" id="amax-6">6 mánuðir</option><option value="9" id="amax-9">9 mánuðir</option><option value="12" id="amax-12">12 mánuðir</option><option value="18" id="amax-18">18 mánuðir</option>
+          </select>
+        </div>
+      </div>
+      <button class="submit-btn" id="btn-add-submit" onclick="addItem()">Bæta í frystinn</button>
+    </div>
+  </div>
+
+  <!-- SETTINGS SCREEN -->
+  <div class="screen" id="screen-settings">
+    <div class="settings-scroll">
+
+      <div class="settings-section">
+        <div class="form-section-title" id="lbl-set-freezers" style="padding:12px 16px 8px">My freezers</div>
+        <div id="fz-manager"></div>
+        <div style="padding:12px 16px;border-top:0.5px solid var(--border)">
+          <button class="outline-btn" id="btn-add-fz" onclick="openModal('add')">+ Add a freezer</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="form-section-title" id="lbl-set-shelves" style="padding:12px 16px 8px">📦 Skúffur / hólf</div>
+        <div id="shelf-manager"></div>
+        <div style="padding:12px 16px;border-top:0.5px solid var(--border)">
+          <button class="outline-btn" id="btn-add-shelf" onclick="openShelfModal()">+ Bæta við skúffu</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="form-section-title" id="lbl-set-cats" style="padding:12px 16px 8px">🏷️ Vöruflokkar</div>
+        <div id="cat-manager"></div>
+        <div style="padding:12px 16px;border-top:0.5px solid var(--border)">
+          <button class="outline-btn" id="btn-add-cat" onclick="openCatModal()">+ Bæta við flokki</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-row" style="border-top:none">
+          <span class="s-label" id="lbl-set-lang">🌐 Tungumál</span>
+          <div style="display:flex;gap:6px">
+            <button id="lang-btn-is" onclick="setLang('is')" style="padding:6px 14px;border-radius:20px;border:0.5px solid var(--border2);background:var(--ice);color:#fff;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer">🇮🇸 Íslenska</button>
+            <button id="lang-btn-en" onclick="setLang('en')" style="padding:6px 14px;border-radius:20px;border:0.5px solid var(--border2);background:var(--surface2);color:var(--text2);font-family:'DM Sans',sans-serif;font-size:13px;cursor:pointer">🇬🇧 English</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-row" style="border-top:none">
+          <span class="s-label" id="lbl-set-warn">Vara við þegar</span>
+          <select id="warn-threshold" onchange="savePrefs()" style="background:var(--surface2);border:0.5px solid var(--border2);border-radius:8px;padding:6px 10px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;-webkit-appearance:none">
+            <option value="14" id="warn-opt-14">2 weeks left</option><option value="21" id="warn-opt-21">3 weeks left</option>
+            <option value="30" selected id="warn-opt-30">1 month left</option><option value="45" id="warn-opt-45">6 weeks left</option>
+          </select>
+        </div>
+        <div class="settings-row"><span class="s-label" id="lbl-total">Total items</span><span class="s-value" id="pref-count">—</span></div>
+        <div class="settings-row"><span class="s-label" id="lbl-old">Too-old items</span><span class="s-value" id="pref-old" style="color:var(--danger)">0</span></div>
+      </div>
+
+      <div class="settings-section" id="firebase-section">
+        <div class="form-section-title" id="lbl-firebase" style="padding:12px 16px 8px">☁️ Skýgeymsla (Firebase)</div>
+        <div class="settings-row" style="border-top:none;flex-direction:column;align-items:flex-start;gap:6px" id="fb-status-row">
+          <span class="s-label" id="fb-status-label">Athugar tengingu…</span>
+          <span class="s-value" style="font-size:12px;line-height:1.6" id="fb-status-desc"></span>
+        </div>
+        <div id="fb-instructions" style="display:none;padding:0 16px 14px;border-top:0.5px solid var(--border)">
+          <div style="font-size:12px;color:var(--text2);line-height:1.8">
+            <b style="color:var(--text)">Hvernig á að tengja Firebase:</b><br>
+            1. Farðu á <b>console.firebase.google.com</b><br>
+            2. Búðu til nýtt verkefni (Add project)<br>
+            3. Veldu <b>Firestore Database</b> → Start in test mode<br>
+            4. Farðu í Project Settings → Your apps → Web app (&lt;/&gt;)<br>
+            5. Afritaðu <b>firebaseConfig</b> gildin<br>
+            6. Opnaðu þennan HTML skrá í textaritli<br>
+            7. Fylltu út <b>FIREBASE_CONFIG</b> efst í skriptunni<br>
+            8. Settu sama skrána upp á báða síma (t.d. í Google Drive)
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="form-section-title" id="lbl-install" style="padding:12px 16px 8px">Install as app</div>
+        <div class="settings-row" style="border-top:none;flex-direction:column;align-items:flex-start;gap:4px">
+          <span class="s-label" id="lbl-ios">iOS Safari</span>
+          <span class="s-value" id="lbl-ios-desc" style="font-size:12px;line-height:1.5">Tap Share → "Add to Home Screen" → Add</span>
+        </div>
+        <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:4px">
+          <span class="s-label" id="lbl-android">Android Chrome</span>
+          <span class="s-value" id="lbl-android-desc" style="font-size:12px;line-height:1.5">Tap ⋮ → "Add to Home screen" → Add</span>
+        </div>
+      </div>
+
+      <button class="danger-btn" id="btn-clear-cur" onclick="clearCurrent()">Clear current freezer items</button>
+      <button class="danger-btn" id="btn-clear-all" style="margin-top:8px" onclick="clearAll()">Clear all freezers</button>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <button class="tab active" id="tab-items" onclick="switchTab('items')"><span class="tab-icon">🧊</span><span id="tab-lbl-items">Frystir</span></button>
+    <button class="tab" id="tab-add" onclick="switchTab('add')"><span class="tab-icon">＋</span><span id="tab-lbl-add">Bæta við</span></button>
+    <button class="tab" id="tab-settings" onclick="switchTab('settings')"><span class="tab-icon">⚙️</span><span id="tab-lbl-settings">Stillingar</span></button>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-wrap" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h3 id="modal-title">New freezer</h3>
+    <input class="modal-input" type="text" id="modal-name" placeholder="e.g. Garage freezer" maxlength="30">
+    <div class="color-picker" id="color-picker"></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" id="fz-modal-cancel" onclick="closeModal()">Hætta við</button>
+      <button class="btn-confirm" id="fz-modal-save" onclick="confirmModal()">Vista</button>
+    </div>
+  </div>
+</div>
+
+<!-- SHELF MODAL -->
+<div class="modal-wrap" id="shelf-modal" onclick="if(event.target===this)closeShelfModal()">
+  <div class="modal">
+    <h3 id="shelf-modal-title">Ný skúffa</h3>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:10px" id="shelf-modal-sub"></div>
+    <input class="modal-input" type="text" id="shelf-modal-name" placeholder="t.d. Efsta skúffa" maxlength="30">
+    <div class="modal-btns">
+      <button class="btn-cancel" id="shelf-cancel" onclick="closeShelfModal()">Hætta við</button>
+      <button class="btn-confirm" id="shelf-save" onclick="confirmShelfModal()">Vista</button>
+    </div>
+  </div>
+</div>
+
+<!-- MOVE ITEM MODAL -->
+<div class="modal-wrap" id="move-modal" onclick="if(event.target===this)closeMoveModal()">
+  <div class="modal">
+    <h3 id="move-title">Færa vöru</h3>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:14px" id="move-item-name"></div>
+    <div id="lbl-move-freezer" style="font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;font-family:'DM Mono',monospace;margin-bottom:8px">Frystir</div>
+    <select id="move-freezer" onchange="updateMoveShelfOptions()" style="width:100%;background:var(--surface2);border:0.5px solid var(--border2);border-radius:10px;padding:11px 14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;margin-bottom:14px;-webkit-appearance:none"></select>
+    <div id="lbl-move-shelf" style="font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;font-family:'DM Mono',monospace;margin-bottom:8px">Skúffa / hólf</div>
+    <select id="move-shelf" style="width:100%;background:var(--surface2);border:0.5px solid var(--border2);border-radius:10px;padding:11px 14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;margin-bottom:18px;-webkit-appearance:none"></select>
+    <div class="modal-btns">
+      <button class="btn-cancel" id="move-cancel" onclick="closeMoveModal()">Hætta við</button>
+      <button class="btn-confirm" id="move-confirm" onclick="confirmMove()">Færa</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT ITEM MODAL -->
+<div class="modal-wrap" id="edit-item-modal" onclick="if(event.target===this)closeEditItemModal()">
+  <div class="modal" style="max-height:85vh;overflow-y:auto">
+    <h3 id="ei-title">Breyta vöru</h3>
+    <div class="modal-label" id="lbl-ei-name">Nafn</div>
+    <input class="modal-input" type="text" id="ei-name" placeholder="t.d. Kjúklingur" maxlength="50">
+    <div class="modal-label" id="lbl-ei-qty">Magn & Eining</div>
+    <div class="modal-input-row">
+      <input type="number" id="ei-qty" min="0" step="0.1" placeholder="1">
+      <select id="ei-unit"><option>pcs</option><option>kg</option><option>g</option><option>L</option><option>ml</option><option>pack</option><option>bag</option></select>
+    </div>
+    <div class="modal-label" id="lbl-ei-cat">Flokkur</div>
+    <select class="modal-input" id="ei-cat" onchange="eiAutoMax()" style="width:100%;margin-bottom:4px"></select>
+    <div class="modal-label" id="lbl-ei-frozen">Fryst þann</div>
+    <input class="modal-input" type="date" id="ei-frozen" style="width:100%">
+    <div class="modal-label" id="lbl-ei-max">Hámarks geymslutími</div>
+    <select class="modal-input" id="ei-max" style="width:100%">
+      <option value="1" id="eimax-1">1 mánuður</option><option value="2" id="eimax-2">2 mánuðir</option><option value="3" id="eimax-3">3 mánuðir</option>
+      <option value="6" id="eimax-6">6 mánuðir</option><option value="9" id="eimax-9">9 mánuðir</option><option value="12" id="eimax-12">12 mánuðir</option><option value="18" id="eimax-18">18 mánuðir</option>
+    </select>
+    <div class="modal-label" id="lbl-ei-shelf">Skúffa / hólf</div>
+    <select class="modal-input" id="ei-shelf" style="width:100%"></select>
+    <div class="modal-btns" style="margin-top:8px">
+      <button class="btn-cancel" id="ei-cancel" onclick="closeEditItemModal()">Hætta við</button>
+      <button class="btn-confirm" id="ei-save" onclick="confirmEditItem()">Vista</button>
+    </div>
+  </div>
+</div>
+
+<!-- CATEGORY MODAL -->
+<div class="modal-wrap" id="cat-modal" onclick="if(event.target===this)closeCatModal()">
+  <div class="modal">
+    <h3 id="cat-modal-title">Nýr flokkur</h3>
+    <div class="modal-label" id="lbl-cat-name">Nafn flokks</div>
+    <input class="modal-input" type="text" id="cat-modal-name" placeholder="t.d. Villibráð" maxlength="30">
+    <div class="modal-label" id="lbl-cat-icon">Tákn (emoji)</div>
+    <div class="cat-emoji-row" id="cat-emoji-row"></div>
+    <div class="modal-label" id="lbl-cat-max">Hámarks geymslutími (mánuðir)</div>
+    <select class="modal-input" id="cat-modal-max" style="width:100%">
+      <option value="1" id="cmax-1">1 mánuður</option><option value="2" id="cmax-2">2 mánuðir</option><option value="3" id="cmax-3" selected>3 mánuðir</option>
+      <option value="6" id="cmax-6">6 mánuðir</option><option value="9" id="cmax-9">9 mánuðir</option><option value="12" id="cmax-12">12 mánuðir</option><option value="18" id="cmax-18">18 mánuðir</option>
+    </select>
+    <div class="modal-btns" style="margin-top:8px">
+      <button class="btn-cancel" id="cat-cancel" onclick="closeCatModal()">Hætta við</button>
+      <button class="btn-confirm" id="cat-save" onclick="confirmCatModal()">Vista</button>
+    </div>
+  </div>
+</div>
+
+<div class="notif" id="notif"></div>
+
+<script>
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+const CAT_ICONS = {meat:'🥩',fish:'🐟',veg:'🥦',ready:'📦',bread:'🍞',dairy:'🧈',leftover:'🍱',other:'❄️'};
+const CAT_BG = {meat:'rgba(224,90,90,0.15)',fish:'rgba(79,192,141,0.15)',veg:'rgba(79,192,141,0.12)',ready:'rgba(127,119,221,0.15)',bread:'rgba(240,164,69,0.15)',dairy:'rgba(90,174,232,0.12)',leftover:'rgba(211,83,126,0.15)',other:'rgba(90,174,232,0.08)'};
+const CAT_MAX = {meat:6,fish:6,veg:12,ready:3,bread:3,dairy:3,leftover:3,other:6};
+function catIcon(catId){const c=catById(catId);return c.icon||CAT_ICONS[catId]||'❄️';}
+function catBg(catId){return CAT_BG[catId]||'rgba(90,174,232,0.08)';}
+function catMaxMonths(catId){const c=catById(catId);return c.maxMonths||CAT_MAX[catId]||3;}
+const PALETTE = ['#5aaee8','#4fc08d','#f0a445','#e05a5a','#a78bfa','#f472b6','#34d399','#fb923c','#38bdf8','#e879f9'];
+
+let freezers=[], items=[], shelves=[], customCats=[], prefs={warnDays:30,lang:'is'}, activeFreezer=null, activeShelf='all', filter='all';
+let searchQuery='', catFilter='all';
+let modalMode='add', editingId=null, pickedColor=PALETTE[0];
+let shelfModalMode='add', shelfEditingId=null;
+let catModalMode='add', catEditingId=null, pickedEmoji='🍖';
+
+const STRINGS = {
+  is: {
+    // Tab bar
+    tab_freezer:'Frystir', tab_add:'Bæta við', tab_settings:'Stillingar',
+    // Stats
+    stat_stored:'Í geymslu', stat_soon:'Nota fljótt', stat_old:'Of gamalt',
+    // Filters
+    filter_all:'Allt', filter_expired:'Of gamalt', filter_soon:'Nota fljótt', filter_ok:'Í lagi',
+    // Sections
+    sec_expired:'Of gamalt — nota eða farga', sec_soon:'Nota innan mánaðar', sec_ok:'Allt í lagi',
+    // Add form
+    add_title:'Vöruupplýsingar', add_name:'Nafn', add_name_ph:'t.d. Kjúklingur',
+    add_qty:'Magn', add_unit:'Eining', add_freezer_title:'Frystir', add_freezer:'Frystir',
+    add_shelf:'Skúffa / hólf', add_cat:'Flokkur', add_frozen:'Fryst þann',
+    add_max:'Hámarks geymsla', add_btn:'Bæta í frystinn',
+    month_1:'1 mánuður', month_2:'2 mánuðir', month_3:'3 mánuðir', month_6:'6 mánuðir',
+    month_9:'9 mánuðir', month_12:'12 mánuðir', month_18:'18 mánuðir',
+    // Settings
+    set_freezers:'Frystarnir mínir', set_add_fz:'+ Bæta við frystir',
+    set_shelves:'📦 Skúffur / hólf', set_add_shelf:'+ Bæta við skúffu',
+    set_cats:'🏷️ Vöruflokkar', set_add_cat:'+ Bæta við flokki',
+    set_warn:'Vara við þegar', set_warn_2w:'2 vikur eftir', set_warn_3w:'3 vikur eftir',
+    set_warn_1m:'1 mánuður eftir', set_warn_6w:'6 vikur eftir',
+    set_total:'Heildarfjöldi vara', set_old:'Of gamlar vörur',
+    set_firebase:'☁️ Skýgeymsla (Firebase)',
+    set_install:'Setja upp sem app',
+    set_ios:'iOS Safari', set_ios_desc:'Ýttu á Share → "Add to Home Screen" → Add',
+    set_android:'Android Chrome', set_android_desc:'Ýttu á ⋮ → "Add to Home screen" → Add',
+    set_lang:'🌐 Tungumál', lang_is:'Íslenska', lang_en:'English',
+    set_clear_cur:'Hreinsa vörur úr þessum frystir', set_clear_all:'Hreinsa alla frystara',
+    // Freezer modal
+    fz_new:'Nýr frystir', fz_edit:'Breyta frystir', fz_ph:'t.d. Geymslufrystir',
+    btn_cancel:'Hætta við', btn_save:'Vista',
+    // Shelf modal
+    shelf_new:'Ný skúffa', shelf_edit:'Breyta skúffu', shelf_ph:'t.d. Efsta skúffa',
+    // Cat modal
+    cat_new:'Nýr flokkur', cat_edit:'Breyta flokki', cat_name:'Nafn flokks',
+    cat_ph:'t.d. Villibráð', cat_icon:'Tákn (emoji)', cat_max:'Hámarks geymslutími (mánuðir)',
+    cat_builtin:'innbyggt',
+    // Edit item modal
+    ei_title:'Breyta vöru', ei_name:'Nafn', ei_name_ph:'t.d. Kjúklingur',
+    ei_qty:'Magn & Eining', ei_cat:'Flokkur', ei_frozen:'Fryst þann',
+    ei_max:'Hámarks geymslutími', ei_shelf:'Skúffa / hólf', ei_no_shelf:'— Engin skúffa —',
+    // Move modal
+    move_title:'Færa vöru', move_freezer:'Frystir', move_shelf:'Skúffa / hólf', move_btn:'Færa',
+    // Item card
+    card_frozen:'Fryst í', card_frozen_d:'d', card_frozen_mo:'mán',
+    card_expired:'Of gamalt', card_left_d:'d eftir', card_left_mo:'mán eftir',
+    card_expired_ago:'Útrunnið fyrir',
+    // Notifs
+    notif_added:'Vöru bætt við! ❄️', notif_deleted:'Vöru eytt', notif_edited:'Vöru breytt!',
+    notif_moved:'Vöru færð!', notif_cat_added:'Flokki bætt við!', notif_cat_edited:'Flokkur uppfærður!',
+    // Empty
+    empty:'Engar vörur hér.\nSmeltu á + til að bæta við.',
+    // Confirms
+    confirm_clear_cur:'Eyða öllum vörum í þessum frystir?',
+    confirm_clear_all:'Eyða ÖLLUM frystum og vörum?',
+    confirm_del_fz:'Eyða frystinum og öllum vörum hans?',
+    confirm_del_cat_pre:'Eyða flokki "', confirm_del_cat_items:' vara verður færð í "Annað"', confirm_del_cat_suf:'" ?',
+  },
+  en: {
+    tab_freezer:'Freezer', tab_add:'Add', tab_settings:'Settings',
+    stat_stored:'Stored', stat_soon:'Use soon', stat_old:'Too old',
+    filter_all:'All', filter_expired:'Too old', filter_soon:'Use soon', filter_ok:'Good',
+    sec_expired:'Too old — use or discard', sec_soon:'Use within a month', sec_ok:'All good',
+    add_title:'Item details', add_name:'Name', add_name_ph:'e.g. Chicken',
+    add_qty:'Quantity', add_unit:'Unit', add_freezer_title:'Freezer info', add_freezer:'Freezer',
+    add_shelf:'Shelf / compartment', add_cat:'Category', add_frozen:'Frozen on',
+    add_max:'Max storage', add_btn:'Add to freezer',
+    month_1:'1 month', month_2:'2 months', month_3:'3 months', month_6:'6 months',
+    month_9:'9 months', month_12:'12 months', month_18:'18 months',
+    set_freezers:'My freezers', set_add_fz:'+ Add a freezer',
+    set_shelves:'📦 Shelves / compartments', set_add_shelf:'+ Add a shelf',
+    set_cats:'🏷️ Categories', set_add_cat:'+ Add a category',
+    set_warn:'Warn when', set_warn_2w:'2 weeks left', set_warn_3w:'3 weeks left',
+    set_warn_1m:'1 month left', set_warn_6w:'6 weeks left',
+    set_total:'Total items', set_old:'Too-old items',
+    set_firebase:'☁️ Cloud storage (Firebase)',
+    set_install:'Install as app',
+    set_ios:'iOS Safari', set_ios_desc:'Tap Share → "Add to Home Screen" → Add',
+    set_android:'Android Chrome', set_android_desc:'Tap ⋮ → "Add to Home screen" → Add',
+    set_lang:'🌐 Language', lang_is:'Íslenska', lang_en:'English',
+    set_clear_cur:'Clear current freezer items', set_clear_all:'Clear all freezers',
+    fz_new:'New freezer', fz_edit:'Edit freezer', fz_ph:'e.g. Garage freezer',
+    btn_cancel:'Cancel', btn_save:'Save',
+    shelf_new:'New shelf', shelf_edit:'Edit shelf', shelf_ph:'e.g. Top shelf',
+    cat_new:'New category', cat_edit:'Edit category', cat_name:'Category name',
+    cat_ph:'e.g. Game meat', cat_icon:'Icon (emoji)', cat_max:'Max storage (months)',
+    cat_builtin:'built-in',
+    ei_title:'Edit item', ei_name:'Name', ei_name_ph:'e.g. Chicken',
+    ei_qty:'Quantity & Unit', ei_cat:'Category', ei_frozen:'Frozen on',
+    ei_max:'Max storage', ei_shelf:'Shelf / compartment', ei_no_shelf:'— No shelf —',
+    move_title:'Move item', move_freezer:'Freezer', move_shelf:'Shelf / compartment', move_btn:'Move',
+    card_frozen:'Frozen', card_frozen_d:'d', card_frozen_mo:'mo',
+    card_expired:'Expired', card_left_d:'d left', card_left_mo:'mo left',
+    card_expired_ago:'Expired',
+    notif_added:'Item added! ❄️', notif_deleted:'Item deleted', notif_edited:'Item updated!',
+    notif_moved:'Item moved!', notif_cat_added:'Category added!', notif_cat_edited:'Category updated!',
+    empty:'No items here.\nTap + to add something.',
+    confirm_clear_cur:'Delete all items in this freezer?',
+    confirm_clear_all:'Delete ALL freezers and items?',
+    confirm_del_fz:'Delete this freezer and all its items?',
+    confirm_del_cat_pre:'Delete category "', confirm_del_cat_items:' items will move to "Other"', confirm_del_cat_suf:'" ?',
+  }
+};
+function t(key){ return (STRINGS[prefs.lang||'is']||STRINGS.is)[key]||key; }
+
+// Built-in cats (never deleted, but overrideable)
+const BUILTIN_CATS = [
+  {id:'meat', name_is:'Kjöt & alifuglar',  name_en:'Meat & poultry',    icon:'🥩',maxMonths:6, builtin:true},
+  {id:'fish', name_is:'Fiskur & sjávarfang',name_en:'Fish & seafood',    icon:'🐟',maxMonths:6, builtin:true},
+  {id:'veg',  name_is:'Grænmeti & ávextir', name_en:'Veg & fruit',       icon:'🥦',maxMonths:12,builtin:true},
+  {id:'ready',name_is:'Tilbúnar máltíðir',  name_en:'Ready meals',       icon:'📦',maxMonths:3, builtin:true},
+  {id:'bread',name_is:'Brauð & bakkelsi',   name_en:'Bread & pastry',    icon:'🍞',maxMonths:3, builtin:true},
+  {id:'dairy',name_is:'Mjólkurvörur & egg', name_en:'Dairy & eggs',      icon:'🧈',maxMonths:3, builtin:true},
+  {id:'leftover',name_is:'Afgangur',         name_en:'Leftovers',         icon:'🍱',maxMonths:3, builtin:true},
+  {id:'other',name_is:'Annað',              name_en:'Other',             icon:'❄️',maxMonths:6, builtin:true},
+];
+const EMOJI_OPTIONS = ['🥩','🐟','🥦','📦','🍞','🧈','🍱','❄️','🍖','🫙','🥚','🍕','🌮','🍜','🥗','🧆','🦐','🦆','🐖','🥕','🍓','🫐','🍰','🧁','🥧','🎂'];
+
+function allCats() { return [...BUILTIN_CATS, ...customCats]; }
+function catById(id) {
+  const c = allCats().find(c=>c.id===id) || {id:'other',name_is:'Annað',name_en:'Other',icon:'❄️',maxMonths:6};
+  return {...c, name: c.builtin ? (c['name_'+(prefs.lang||'is')] || c.name_is) : c.name};
+}
+
+function load() {
+  try { freezers=JSON.parse(localStorage.getItem('fz2_freezers')||'[]'); } catch(e){freezers=[];}
+  try { items=JSON.parse(localStorage.getItem('fz2_items')||'[]'); } catch(e){items=[];}
+  try { shelves=JSON.parse(localStorage.getItem('fz2_shelves')||'[]'); } catch(e){shelves=[];}
+  try { customCats=JSON.parse(localStorage.getItem('fz2_customcats')||'[]'); } catch(e){customCats=[];}
+  try { prefs=JSON.parse(localStorage.getItem('fz2_prefs')||'{"warnDays":30}'); } catch(e){}
+  if (!freezers.length) seed();
+  activeFreezer = freezers[0]?.id || null;
+  activeShelf = 'all';
+}
+
+function applyCloudData(data) {
+  if (!data) return;
+  let changed = false;
+  if (data.freezers) { freezers = data.freezers; changed = true; }
+  if (data.items) { items = data.items; changed = true; }
+  if (data.shelves) { shelves = data.shelves; changed = true; }
+  if (data.customCats) { customCats = data.customCats; changed = true; }
+  if (data.prefs) { prefs = data.prefs; changed = true; }
+  if (changed) {
+    localStorage.setItem('fz2_freezers', JSON.stringify(freezers));
+    localStorage.setItem('fz2_items', JSON.stringify(items));
+    localStorage.setItem('fz2_shelves', JSON.stringify(shelves));
+    localStorage.setItem('fz2_customcats', JSON.stringify(customCats));
+    localStorage.setItem('fz2_prefs', JSON.stringify(prefs));
+    if (!activeFreezer || !freezers.find(f=>f.id===activeFreezer)) {
+      activeFreezer = freezers[0]?.id || null;
+    }
+    render();
+    showNotif('☁️ Gögn samstillt!');
+  }
+}
+
+function updateFbStatus() {
+  const lbl = document.getElementById('fb-status-label');
+  const desc = document.getElementById('fb-status-desc');
+  const inst = document.getElementById('fb-instructions');
+  const status = window.fbStatus;
+  if (status === 'connected') {
+    lbl.innerHTML = '🟢 Tengt — gögn samstillist sjálfkrafa';
+    lbl.style.color = 'var(--ice)';
+    desc.textContent = 'Breytingar sjást á öllum tækjum samstundis.';
+    inst.style.display = 'none';
+  } else if (status === 'not_configured') {
+    lbl.innerHTML = '⚙️ Ekki uppsett';
+    lbl.style.color = 'var(--warn)';
+    desc.textContent = 'Gögn eru aðeins vistuð á þessum síma. Sjá leiðbeiningar hér að neðan.';
+    inst.style.display = 'block';
+  } else if (status === 'error') {
+    lbl.innerHTML = '🔴 Villa við tengingu';
+    lbl.style.color = 'var(--danger)';
+    desc.textContent = 'Athugaðu Firebase stillingar og netsamband.';
+    inst.style.display = 'block';
+  } else {
+    lbl.textContent = 'Athugar tengingu…';
+  }
+}
+
+function seed() {
+  freezers=[{id:'fz1',name:'Main freezer',color:'#5aaee8'},{id:'fz2',name:'Garage freezer',color:'#4fc08d'}];
+  const ago=d=>{const dt=new Date(TODAY);dt.setDate(dt.getDate()-d);return dt.toISOString().slice(0,10);};
+  items=[
+    {id:1,name:'Minced beef',qty:500,unit:'g',frozen:ago(210),maxMonths:6,cat:'meat',fzId:'fz1'},
+    {id:2,name:'Salmon fillets',qty:2,unit:'pcs',frozen:ago(40),maxMonths:6,cat:'fish',fzId:'fz1'},
+    {id:3,name:'Frozen peas',qty:800,unit:'g',frozen:ago(60),maxMonths:12,cat:'veg',fzId:'fz1'},
+    {id:4,name:'Chicken thighs',qty:4,unit:'pcs',frozen:ago(150),maxMonths:9,cat:'meat',fzId:'fz2'},
+    {id:5,name:'Lasagne',qty:1,unit:'pcs',frozen:ago(10),maxMonths:3,cat:'ready',fzId:'fz2'},
+    {id:6,name:'Sourdough loaf',qty:1,unit:'pcs',frozen:ago(75),maxMonths:3,cat:'bread',fzId:'fz2'},
+    {id:7,name:'Leftover chilli',qty:2,unit:'pcs',frozen:ago(95),maxMonths:3,cat:'leftover',fzId:'fz1'},
+    {id:8,name:'Edamame beans',qty:400,unit:'g',frozen:ago(20),maxMonths:12,cat:'veg',fzId:'fz2'},
+  ];
+  persist();
+}
+
+function persist() {
+  localStorage.setItem('fz2_freezers',JSON.stringify(freezers));
+  localStorage.setItem('fz2_items',JSON.stringify(items));
+  localStorage.setItem('fz2_shelves',JSON.stringify(shelves));
+  localStorage.setItem('fz2_customcats',JSON.stringify(customCats));
+  localStorage.setItem('fz2_prefs',JSON.stringify(prefs));
+  if (window.fbSave && window.fbStatus === 'connected') {
+    window.fbSave({ freezers, items, shelves, customCats, prefs });
+  }
+}
+
+const daysFrozen=d=>{const f=new Date(d);f.setHours(0,0,0,0);return Math.round((TODAY-f)/86400000);};
+const daysLeft=i=>(i.maxMonths*30)-daysFrozen(i.frozen);
+const pct=i=>Math.min(100,Math.round((daysFrozen(i.frozen)/(i.maxMonths*30))*100));
+function statusOf(i){const d=daysLeft(i);return d<0?'expired':d<=prefs.warnDays?'soon':'ok';}
+function fmtLeft(i){const d=daysLeft(i);if(d<0)return t('card_expired_ago')+' '+Math.abs(d)+'d';if(d<30)return d+'d '+t('card_left_d').replace(/\d+\s*/,'');return Math.round(d/30)+' '+t('card_left_mo').replace(/\d+\s*/,'');}
+function fmtSub(i){const df=daysFrozen(i.frozen);const m=Math.floor(df/30),d=df%30;return t('card_frozen')+' '+(m>0?m+t('card_frozen_mo')+' '+d+t('card_frozen_d'):d+t('card_frozen_d'));}
+function fmtQty(i){return parseFloat(i.qty.toFixed(2))+' '+i.unit;}
+const curFz=()=>freezers.find(f=>f.id===activeFreezer);
+const curShelves=()=>shelves.filter(s=>s.fzId===activeFreezer);
+const curItems=()=>items.filter(i=>i.fzId===activeFreezer);
+
+function renderShelfTabs() {
+  const sh = curShelves();
+  const allCount = items.filter(i=>i.fzId===activeFreezer).length;
+  let html = `<button class="shelf-tab${activeShelf==='all'?' active':''}" onclick="selectShelf('all')">Allt (${allCount})</button>`;
+  sh.forEach(s=>{
+    const n=items.filter(i=>i.fzId===activeFreezer&&i.shelfId===s.id).length;
+    html+=`<button class="shelf-tab${activeShelf===s.id?' active':''}" onclick="selectShelf('${s.id}')">${s.name} (${n})</button>`;
+  });
+  html+=`<button class="shelf-tab-add" onclick="openShelfModal()" title="Bæta við skúffu">＋</button>`;
+  document.getElementById('shelf-tabs').innerHTML=html;
+}
+
+function renderShelfManager() {
+  const el = document.getElementById('shelf-manager');
+  if(!el) return;
+  const fz = curFz();
+  const fzShelves = shelves.filter(s=>s.fzId===activeFreezer);
+  if(!fzShelves.length){
+    el.innerHTML='<div style="padding:12px 16px;font-size:13px;color:var(--text3)">Engar skúffur í '+(fz?.name||'þessum frystir')+'.</div>';
+    return;
+  }
+  el.innerHTML = fzShelves.map(s=>{
+    const n=items.filter(i=>i.shelfId===s.id).length;
+    return `<div class="fz-list-item">
+      <span style="font-size:18px">📦</span>
+      <span class="fz-item-name">${s.name} <span style="font-size:11px;color:var(--text3)">(${fz?.name})</span></span>
+      <span class="fz-item-count">${n} vara${n!==1?'r':''}</span>
+      <button class="icon-btn" onclick="openShelfModal('${s.id}')" title="Breyta">✏️</button>
+      <button class="icon-btn" onclick="deleteShelf('${s.id}')" title="Eyða" style="color:var(--danger)">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function renderShelfSelect() {
+  const fzId = document.getElementById('a-freezer').value || activeFreezer;
+  const fzShelves = shelves.filter(s=>s.fzId===fzId);
+  const sel = document.getElementById('a-shelf');
+  sel.innerHTML = '<option value="">— Engin skúffa —</option>' +
+    fzShelves.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+}
+
+function selectShelf(id){activeShelf=id;catFilter='all';render();}
+
+function openShelfModal(editId) {
+  shelfModalMode = editId ? 'edit' : 'add';
+  shelfEditingId = editId || null;
+  const fz = curFz();
+  if(shelfModalMode==='edit'){
+    const s=shelves.find(x=>x.id===editId);
+    document.getElementById('shelf-modal-title').textContent=t('shelf_edit');
+    document.getElementById('shelf-modal-sub').textContent=fz?.name||'';
+    document.getElementById('shelf-modal-name').value=s?.name||'';
+    document.getElementById('shelf-modal-name').placeholder=t('shelf_ph');
+  } else {
+    document.getElementById('shelf-modal-title').textContent=t('shelf_new');
+    document.getElementById('shelf-modal-sub').textContent='Í: '+(fz?.name||'');
+    document.getElementById('shelf-modal-name').value='';
+    document.getElementById('shelf-modal-name').placeholder=t('shelf_ph');
+  }
+  document.getElementById('shelf-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('shelf-modal-name').focus(),100);
+}
+function closeShelfModal(){document.getElementById('shelf-modal').classList.remove('open');}
+function confirmShelfModal(){
+  const name=document.getElementById('shelf-modal-name').value.trim();
+  if(!name)return;
+  if(shelfModalMode==='add'){
+    shelves.push({id:'sh'+Date.now(),name,fzId:activeFreezer});
+    showNotif(t('notif_added'));
+  } else {
+    const s=shelves.find(x=>x.id===shelfEditingId);
+    if(s) s.name=name;
+    showNotif(t('notif_edited'));
+  }
+  closeShelfModal(); persist(); render();
+}
+function deleteShelf(id){
+  const s=shelves.find(x=>x.id===id);
+  if(!confirm('Eyða "'+s?.name+'"?'))return;
+  shelves=shelves.filter(x=>x.id!==id);
+  items.forEach(i=>{if(i.shelfId===id)i.shelfId=null;});
+  if(activeShelf===id) activeShelf='all';
+  persist(); render();
+}
+
+function renderTabs() {
+  document.getElementById('freezer-tabs').innerHTML =
+    freezers.map(fz=>{
+      const old=items.filter(i=>i.fzId===fz.id&&statusOf(i)==='expired').length;
+      return `<button class="fz-tab${fz.id===activeFreezer?' active':''}" onclick="selectFz('${fz.id}')">
+        <span class="fz-dot" style="background:${fz.color}"></span>${fz.name}
+        ${old?`<span class="fz-badge">${old}</span>`:''}
+      </button>`;
+    }).join('')+
+    `<button class="fz-tab-add" onclick="openModal('add')" title="Add freezer">＋</button>`;
+}
+
+function renderManager() {
+  document.getElementById('fz-manager').innerHTML = freezers.map(fz=>{
+    const n=items.filter(i=>i.fzId===fz.id).length;
+    const canDel=freezers.length>1;
+    return `<div class="fz-list-item">
+      <div class="fz-color-dot" style="background:${fz.color}"></div>
+      <span class="fz-item-name">${fz.name}</span>
+      <span class="fz-item-count">${n} item${n!==1?'s':''}</span>
+      <button class="icon-btn" onclick="openModal('edit','${fz.id}')" title="Edit">✏️</button>
+      ${canDel?`<button class="icon-btn" onclick="deleteFz('${fz.id}')" title="Delete" style="color:var(--danger)">✕</button>`:''}
+    </div>`;
+  }).join('');
+}
+
+function renderFreezerSelect() {
+  document.getElementById('a-freezer').innerHTML = freezers.map(fz=>
+    `<option value="${fz.id}"${fz.id===activeFreezer?' selected':''}>${fz.name}</option>`
+  ).join('');
+  renderShelfSelect();
+}
+
+function render() {
+  const fz=curFz();
+  document.getElementById('hdr-date').textContent=TODAY.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+  document.getElementById('hdr-title').textContent=fz?.name||'Freezer';
+
+  const mine=curItems();
+  const exp=mine.filter(i=>statusOf(i)==='expired').length;
+  const soon=mine.filter(i=>statusOf(i)==='soon').length;
+  document.getElementById('s-total').textContent=mine.length;
+  document.getElementById('s-soon').textContent=soon;
+  document.getElementById('s-old').textContent=exp;
+  document.getElementById('pref-count').textContent=items.length+' items, '+freezers.length+' freezer'+(freezers.length!==1?'s':'');
+  document.getElementById('pref-old').textContent=items.filter(i=>statusOf(i)==='expired').length;
+
+  let vis=[...mine];
+  if(filter==='expired') vis=mine.filter(i=>statusOf(i)==='expired');
+  else if(filter==='soon') vis=mine.filter(i=>statusOf(i)==='soon');
+  else if(filter==='ok') vis=mine.filter(i=>statusOf(i)==='ok');
+  if(activeShelf!=='all') vis=vis.filter(i=>i.shelfId===activeShelf);
+  if(catFilter!=='all') vis=vis.filter(i=>i.cat===catFilter);
+  if(searchQuery){
+    vis=vis.filter(i=>{
+      if(i.name.toLowerCase().includes(searchQuery)) return true;
+      const c=catById(i.cat);
+      const cname=(c.builtin?(c['name_'+(prefs.lang||'is')]||c.name_is):c.name).toLowerCase();
+      return cname.includes(searchQuery)||c.icon.includes(searchQuery);
+    });
+  }
+  vis.sort((a,b)=>daysLeft(a)-daysLeft(b));
+
+  const list=document.getElementById('item-list');
+  if(!vis.length){list.innerHTML=`<div class="empty-msg"><span class="big">🧊</span>${t('empty').replace('\n','<br>')}</div>`;}
+  else {
+    const grp={expired:[],soon:[],ok:[]};
+    vis.forEach(i=>grp[statusOf(i)].push(i));
+    const sec=(lbl,arr)=>arr.length?`<div class="section-label">${lbl}</div>`+arr.map(cardHtml).join(''):'';
+    list.innerHTML=sec(t('sec_expired'),grp.expired)+sec(t('sec_soon'),grp.soon)+(grp.expired.length||grp.soon.length?sec(t('sec_ok'),grp.ok):grp.ok.map(cardHtml).join(''));
+  }
+
+  renderTabs(); renderManager(); renderFreezerSelect(); renderShelfTabs(); renderShelfManager(); renderShelfSelect(); renderCatManager(); renderCatFilterRow();
+  renderCatSelect('a-cat', document.getElementById('a-cat').value||'meat');
+  applyLang();
+}
+
+function cardHtml(i) {
+  const s=statusOf(i),p=pct(i);
+  const bar=s==='expired'?'#e05a5a':s==='soon'?'#f0a445':'#5aaee8';
+  const shelf=i.shelfId?shelves.find(x=>x.id===i.shelfId):null;
+  return `<div class="item-card ${s}">
+    <div class="item-icon" style="background:${catBg(i.cat)}">${catIcon(i.cat)}</div>
+    <div class="item-body">
+      <div class="item-name">${i.name}</div>
+      <div class="item-sub">${fmtSub(i)}</div>
+      <div class="item-sub" style="color:var(--text2);font-size:13px;font-weight:500">${fmtQty(i)}</div>
+      ${shelf?`<div class="item-shelf-tag" style="cursor:pointer" onclick="openMoveModal(${i.id})">📦 ${shelf.name} ✎</div>`:`<div class="item-shelf-tag" style="cursor:pointer;color:var(--text3)" onclick="openMoveModal(${i.id})">📦 Engin skúffa ✎</div>`}
+      <div class="progress-bar"><div class="progress-fill" style="width:${p}%;background:${bar}"></div></div>
+    </div>
+    <div class="item-right">
+      <div class="badge ${s}">${s==='expired'?t('card_expired'):fmtLeft(i)}</div>
+      <div class="qty-controls">
+        <button class="qty-btn" onclick="adj(${i.id},-1)">−</button>
+        <button class="qty-btn" onclick="adj(${i.id},1)">+</button>
+      </div>
+    </div>
+    <button class="edit-btn" onclick="openEditItemModal(${i.id})">✏️</button>
+    <button class="del-btn" onclick="del(${i.id})">✕</button>
+  </div>`;
+}
+
+function adj(id,delta){const i=items.find(x=>x.id===id);if(!i)return;i.qty=Math.max(0,parseFloat((i.qty+delta).toFixed(2)));persist();render();}
+function del(id){items=items.filter(x=>x.id!==id);persist();render();}
+
+let movingItemId = null;
+function openMoveModal(id) {
+  movingItemId = id;
+  const item = items.find(x=>x.id===id);
+  if(!item) return;
+  document.getElementById('move-item-name').textContent = item.name;
+  // Populate freezer select
+  document.getElementById('move-freezer').innerHTML = freezers.map(fz=>
+    `<option value="${fz.id}"${fz.id===item.fzId?' selected':''}>${fz.name}</option>`
+  ).join('');
+  updateMoveShelfOptions(item.shelfId);
+  document.getElementById('move-modal').classList.add('open');
+}
+function updateMoveShelfOptions(currentShelfId) {
+  const fzId = document.getElementById('move-freezer').value;
+  const fzShelves = shelves.filter(s=>s.fzId===fzId);
+  const item = items.find(x=>x.id===movingItemId);
+  const sel = currentShelfId !== undefined ? currentShelfId : (item?.shelfId||'');
+  document.getElementById('move-shelf').innerHTML =
+    `<option value="">${t('ei_no_shelf')}</option>` +
+    fzShelves.map(s=>`<option value="${s.id}"${s.id===sel?' selected':''}>${s.name}</option>`).join('');
+}
+function closeMoveModal(){document.getElementById('move-modal').classList.remove('open');movingItemId=null;}
+function confirmMove(){
+  const item=items.find(x=>x.id===movingItemId);
+  if(!item)return;
+  const newFzId=document.getElementById('move-freezer').value;
+  const newShelfId=document.getElementById('move-shelf').value||null;
+  item.fzId=newFzId;
+  item.shelfId=newShelfId;
+  closeMoveModal();
+  persist();
+  const fzName=freezers.find(f=>f.id===newFzId)?.name||'';
+  const shName=newShelfId?shelves.find(s=>s.id===newShelfId)?.name:'';
+  showNotif(t('notif_moved'));
+  render();
+}
+function onSearch(val){
+  searchQuery=val.trim().toLowerCase();
+  document.getElementById('search-clear').style.display=searchQuery?'block':'none';
+  render();
+}
+function clearSearch(){
+  searchQuery='';
+  document.getElementById('search-input').value='';
+  document.getElementById('search-clear').style.display='none';
+  render();
+}
+function setCatFilter(catId){
+  catFilter=catId;
+  render();
+}
+function renderCatFilterRow(){
+  const el=document.getElementById('cat-filter-row');
+  if(!el)return;
+  const fzItems=items.filter(i=>i.fzId===activeFreezer);
+  const usedCatIds=[...new Set(fzItems.map(i=>i.cat))];
+  if(usedCatIds.length<=1){el.innerHTML='';return;}
+  const allLabel=prefs.lang==='en'?'All':'Allt';
+  el.innerHTML=`<button class="cat-filter-btn${catFilter==='all'?' active':''}" onclick="setCatFilter('all')">${allLabel}</button>`
+    +usedCatIds.map(id=>{
+      const c=catById(id);
+      const name=c.builtin?(c['name_'+(prefs.lang||'is')]||c.name_is):c.name;
+      return `<button class="cat-filter-btn${catFilter===id?' active':''}" onclick="setCatFilter('${id}')">${c.icon} ${name}</button>`;
+    }).join('');
+}
+
+function setFilter(f,btn){filter=f;document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');render();}
+function selectFz(id){activeFreezer=id;activeShelf='all';filter='all';catFilter='all';searchQuery='';const si=document.getElementById('search-input');if(si)si.value='';const sc=document.getElementById('search-clear');if(sc)sc.style.display='none';document.querySelectorAll('.filter-btn').forEach((b,i)=>b.classList.toggle('active',i===0));render();}
+function autoMax(){document.getElementById('a-max').value=catMaxMonths(document.getElementById('a-cat').value);}
+
+function addItem(){
+  const name=document.getElementById('a-name').value.trim();
+  if(!name){document.getElementById('a-name').focus();return;}
+  const fzId=document.getElementById('a-freezer').value;
+  const shelfId=document.getElementById('a-shelf').value||null;
+  items.push({id:Date.now(),name,qty:parseFloat(document.getElementById('a-qty').value)||1,unit:document.getElementById('a-unit').value,cat:document.getElementById('a-cat').value,frozen:document.getElementById('a-frozen').value||TODAY.toISOString().slice(0,10),maxMonths:parseInt(document.getElementById('a-max').value)||3,fzId,shelfId});
+  persist();
+  document.getElementById('a-name').value='';document.getElementById('a-qty').value='1';
+  activeFreezer=fzId;
+  showNotif(t('notif_added'));
+  switchTab('items');render();
+}
+
+function clearCurrent(){const fz=curFz();if(confirm(t('confirm_clear_cur'))){items=items.filter(i=>i.fzId!==activeFreezer);persist();render();}}
+function clearAll(){if(confirm(t('confirm_clear_all'))){items=[];persist();render();}}
+
+/* Modal */
+function buildSwatches(){
+  document.getElementById('color-picker').innerHTML=PALETTE.map(c=>
+    `<div class="color-swatch${c===pickedColor?' selected':''}" style="background:${c}" onclick="pickColor('${c}',this)"></div>`
+  ).join('');
+}
+function pickColor(c,el){pickedColor=c;document.querySelectorAll('.color-swatch').forEach(s=>s.classList.remove('selected'));el.classList.add('selected');}
+
+function openModal(mode,id){
+  modalMode=mode; editingId=id||null;
+  if(mode==='edit'){
+    const fz=freezers.find(f=>f.id===id);
+    pickedColor=fz.color;
+    document.getElementById('modal-title').textContent=t('fz_edit');
+    document.getElementById('modal-name').value=fz.name;
+    document.getElementById('modal-name').placeholder=t('fz_ph');
+  } else {
+    pickedColor=PALETTE[freezers.length%PALETTE.length];
+    document.getElementById('modal-title').textContent=t('fz_new');
+    document.getElementById('modal-name').value='';
+    document.getElementById('modal-name').placeholder=t('fz_ph');
+  }
+  buildSwatches();
+  document.getElementById('modal').classList.add('open');
+  setTimeout(()=>document.getElementById('modal-name').focus(),100);
+}
+function closeModal(){document.getElementById('modal').classList.remove('open');}
+function confirmModal(){
+  const name=document.getElementById('modal-name').value.trim();
+  if(!name)return;
+  if(modalMode==='add'){
+    const id='fz'+Date.now();
+    freezers.push({id,name,color:pickedColor});
+    activeFreezer=id;
+    showNotif(t('notif_added'));
+  } else {
+    const fz=freezers.find(f=>f.id===editingId);
+    if(fz){fz.name=name;fz.color=pickedColor;}
+    showNotif(t('notif_edited'));
+  }
+  closeModal();persist();render();
+}
+function deleteFz(id){
+  const fz=freezers.find(f=>f.id===id);
+  if(!confirm(t('confirm_del_fz')))return;
+  freezers=freezers.filter(f=>f.id!==id);
+  items=items.filter(i=>i.fzId!==id);
+  if(activeFreezer===id)activeFreezer=freezers[0]?.id||null;
+  persist();render();
+}
+
+function renderCatSelect(selId, currentVal) {
+  const cats = allCats();
+  document.getElementById(selId).innerHTML = cats.map(c => {
+    const name = c.builtin ? (c['name_'+(prefs.lang||'is')]||c.name_is) : c.name;
+    return `<option value="${c.id}"${c.id===currentVal?' selected':''}>${c.icon} ${name}</option>`;
+  }).join('');
+}
+
+function renderCatManager() {
+  const el = document.getElementById('cat-manager');
+  if (!el) return;
+  const cats = allCats();
+  el.innerHTML = cats.map(c => {
+    const name = c.builtin ? (c['name_'+(prefs.lang||'is')]||c.name_is) : c.name;
+    const mo = prefs.lang==='en' ? 'mo' : 'mán';
+    return `<div class="cat-list-item">
+    <div class="cat-emoji" style="background:${catBg(c.id)}">${c.icon}</div>
+    <span class="cat-item-name">${name}</span>
+    <span class="cat-item-max">${c.maxMonths} ${mo}</span>
+    ${!c.builtin
+      ? `<button class="icon-btn" onclick="openCatModal('${c.id}')" title="Breyta">✏️</button>
+         <button class="icon-btn" onclick="deleteCat('${c.id}')" title="Eyða" style="color:var(--danger)">✕</button>`
+      : `<span style="font-size:11px;color:var(--text3);padding:4px 6px">${t('cat_builtin')}</span>`}
+  </div>`;
+  }).join('');
+}
+
+/* ── Edit Item Modal ── */
+let editingItemId = null;
+function openEditItemModal(id) {
+  editingItemId = id;
+  const i = items.find(x=>x.id===id);
+  if (!i) return;
+  document.getElementById('ei-name').value = i.name;
+  document.getElementById('ei-qty').value = i.qty;
+  renderCatSelect('ei-unit', i.unit);
+  document.getElementById('ei-unit').innerHTML = ['pcs','kg','g','L','ml','pack','bag'].map(u=>`<option${u===i.unit?' selected':''}>${u}</option>`).join('');
+  renderCatSelect('ei-cat', i.cat);
+  document.getElementById('ei-frozen').value = i.frozen;
+  document.getElementById('ei-frozen').max = TODAY.toISOString().slice(0,10);
+  document.getElementById('ei-max').value = i.maxMonths;
+  // shelf options
+  const fzShelves = shelves.filter(s=>s.fzId===i.fzId);
+  document.getElementById('ei-shelf').innerHTML = `<option value="">${t('ei_no_shelf')}</option>` +
+    fzShelves.map(s=>`<option value="${s.id}"${s.id===i.shelfId?' selected':''}>${s.name}</option>`).join('');
+  document.getElementById('edit-item-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('ei-name').focus(),100);
+}
+function closeEditItemModal(){document.getElementById('edit-item-modal').classList.remove('open');editingItemId=null;}
+function eiAutoMax(){document.getElementById('ei-max').value=catMaxMonths(document.getElementById('ei-cat').value);}
+function confirmEditItem(){
+  const i = items.find(x=>x.id===editingItemId);
+  if (!i) return;
+  const name = document.getElementById('ei-name').value.trim();
+  if (!name) return;
+  i.name = name;
+  i.qty = parseFloat(document.getElementById('ei-qty').value)||1;
+  i.unit = document.getElementById('ei-unit').value;
+  i.cat = document.getElementById('ei-cat').value;
+  i.frozen = document.getElementById('ei-frozen').value;
+  i.maxMonths = parseInt(document.getElementById('ei-max').value)||3;
+  i.shelfId = document.getElementById('ei-shelf').value||null;
+  closeEditItemModal();
+  persist(); render();
+  showNotif(t('notif_edited'));
+}
+
+/* ── Category Modal ── */
+function openCatModal(editId) {
+  catModalMode = editId ? 'edit' : 'add';
+  catEditingId = editId || null;
+  pickedEmoji = editId ? (customCats.find(c=>c.id===editId)?.icon||'🍖') : '🍖';
+  document.getElementById('cat-modal-title').textContent = editId ? t('cat_edit') : t('cat_new');
+  document.getElementById('cat-modal-name').value = editId ? (customCats.find(c=>c.id===editId)?.name||'') : '';
+  document.getElementById('cat-modal-name').placeholder = t('cat_ph');
+  document.getElementById('cat-modal-max').value = editId ? (customCats.find(c=>c.id===editId)?.maxMonths||3) : 3;
+  buildEmojiPicker();
+  document.getElementById('cat-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('cat-modal-name').focus(),100);
+}
+function closeCatModal(){document.getElementById('cat-modal').classList.remove('open');}
+function buildEmojiPicker(){
+  document.getElementById('cat-emoji-row').innerHTML = EMOJI_OPTIONS.map(e=>
+    `<button class="cat-emoji-opt${e===pickedEmoji?' selected':''}" onclick="pickEmoji('${e}',this)">${e}</button>`
+  ).join('');
+}
+function pickEmoji(e,el){pickedEmoji=e;document.querySelectorAll('.cat-emoji-opt').forEach(b=>b.classList.remove('selected'));el.classList.add('selected');}
+function confirmCatModal(){
+  const name = document.getElementById('cat-modal-name').value.trim();
+  if (!name) return;
+  const maxMonths = parseInt(document.getElementById('cat-modal-max').value)||3;
+  if (catModalMode==='add'){
+    customCats.push({id:'cat'+Date.now(),name,icon:pickedEmoji,maxMonths});
+    showNotif(t('notif_cat_added'));
+  } else {
+    const c = customCats.find(x=>x.id===catEditingId);
+    if (c){c.name=name;c.icon=pickedEmoji;c.maxMonths=maxMonths;}
+    showNotif(t('notif_cat_edited'));
+  }
+  closeCatModal(); persist(); render();
+}
+function deleteCat(id){
+  const c=customCats.find(x=>x.id===id);
+  const n=items.filter(i=>i.cat===id).length;
+  if(!confirm(t('confirm_del_cat_pre')+c?.name+'"'+(n?' — '+n+t('confirm_del_cat_items'):'')+t('confirm_del_cat_suf')))return;
+  customCats=customCats.filter(x=>x.id!==id);
+  items.forEach(i=>{if(i.cat===id)i.cat='other';});
+  persist(); render();
+}
+function setLang(lang) {
+  prefs.lang = lang;
+  savePrefs();
+  applyLang();
+  render();
+}
+
+function applyLang() {
+  const l = prefs.lang || 'is';
+  const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
+  const setAttr = (id, attr, val) => { const el=document.getElementById(id); if(el) el[attr]=val; };
+
+  // Tabs
+  set('tab-lbl-items', t('tab_freezer'));
+  set('tab-lbl-add', t('tab_add'));
+  set('tab-lbl-settings', t('tab_settings'));
+
+  // Stats
+  set('lbl-stored', t('stat_stored'));
+  set('lbl-soon', t('stat_soon'));
+  set('lbl-old-stat', t('stat_old'));
+
+  // Filters
+  set('fbtn-all', t('filter_all'));
+  set('fbtn-expired', t('filter_expired'));
+  set('fbtn-soon', t('filter_soon'));
+  set('fbtn-ok', t('filter_ok'));
+
+  // Add form
+  set('lbl-add-title', t('add_title'));
+  set('lbl-a-name', t('add_name'));
+  set('lbl-a-qty', t('add_qty'));
+  set('lbl-a-unit', t('add_unit'));
+  set('lbl-add-fz-title', t('add_freezer_title'));
+  set('lbl-a-freezer', t('add_freezer'));
+  set('lbl-a-shelf', t('add_shelf'));
+  set('lbl-a-cat', t('add_cat'));
+  set('lbl-a-frozen', t('add_frozen'));
+  set('lbl-a-max', t('add_max'));
+  set('btn-add-submit', t('add_btn'));
+  setAttr('a-name', 'placeholder', t('add_name_ph'));
+  const amaxVals = {1:'month_1',2:'month_2',3:'month_3',6:'month_6',9:'month_9',12:'month_12',18:'month_18'};
+  Object.entries(amaxVals).forEach(([v,k])=>{ set('amax-'+v, t(k)); });
+
+  // Settings
+  set('lbl-set-freezers', t('set_freezers'));
+  set('btn-add-fz', t('set_add_fz'));
+  set('lbl-set-shelves', t('set_shelves'));
+  set('btn-add-shelf', t('set_add_shelf'));
+  set('lbl-set-cats', t('set_cats'));
+  set('btn-add-cat', t('set_add_cat'));
+  set('lbl-set-lang', t('set_lang'));
+  set('lbl-set-warn', t('set_warn'));
+  set('warn-opt-14', t('set_warn_2w'));
+  set('warn-opt-21', t('set_warn_3w'));
+  set('warn-opt-30', t('set_warn_1m'));
+  set('warn-opt-45', t('set_warn_6w'));
+  set('lbl-total', t('set_total'));
+  set('lbl-old', t('set_old'));
+  set('lbl-firebase', t('set_firebase'));
+  set('lbl-install', t('set_install'));
+  set('lbl-ios', t('set_ios'));
+  set('lbl-ios-desc', t('set_ios_desc'));
+  set('lbl-android', t('set_android'));
+  set('lbl-android-desc', t('set_android_desc'));
+  set('btn-clear-cur', t('set_clear_cur'));
+  set('btn-clear-all', t('set_clear_all'));
+
+  // Modal buttons
+  set('fz-modal-cancel', t('btn_cancel')); set('fz-modal-save', t('btn_save'));
+  set('shelf-cancel', t('btn_cancel')); set('shelf-save', t('btn_save'));
+  set('ei-cancel', t('btn_cancel')); set('ei-save', t('btn_save'));
+  set('cat-cancel', t('btn_cancel')); set('cat-save', t('btn_save'));
+  set('move-cancel', t('btn_cancel')); set('move-confirm', t('move_btn'));
+
+  // Move modal labels
+  set('move-title', t('move_title'));
+  set('lbl-move-freezer', t('move_freezer'));
+  set('lbl-move-shelf', t('move_shelf'));
+
+  // Edit item modal labels
+  set('ei-title', t('ei_title'));
+  set('lbl-ei-name', t('ei_name'));
+  setAttr('ei-name', 'placeholder', t('ei_name_ph'));
+  set('lbl-ei-qty', t('ei_qty'));
+  set('lbl-ei-cat', t('ei_cat'));
+  set('lbl-ei-frozen', t('ei_frozen'));
+  set('lbl-ei-max', t('ei_max'));
+  set('lbl-ei-shelf', t('ei_shelf'));
+  const eimaxVals = {1:'month_1',2:'month_2',3:'month_3',6:'month_6',9:'month_9',12:'month_12',18:'month_18'};
+  Object.entries(eimaxVals).forEach(([v,k])=>{ set('eimax-'+v, t(k)); });
+
+  // Cat modal labels
+  set('lbl-cat-name', t('cat_name'));
+  setAttr('cat-modal-name', 'placeholder', t('cat_ph'));
+  set('lbl-cat-icon', t('cat_icon'));
+  set('lbl-cat-max', t('cat_max'));
+  Object.entries(eimaxVals).forEach(([v,k])=>{ set('cmax-'+v, t(k)); });
+
+  setAttr('search-input', 'placeholder', prefs.lang==='en' ? 'Search…' : 'Leita…');
+
+  // Language buttons highlight
+  const isBtn = document.getElementById('lang-btn-is');
+  const enBtn = document.getElementById('lang-btn-en');
+  if (isBtn && enBtn) {
+    isBtn.style.background = l==='is' ? 'var(--ice)' : 'var(--surface2)';
+    isBtn.style.color = l==='is' ? '#fff' : 'var(--text2)';
+    enBtn.style.background = l==='en' ? 'var(--ice)' : 'var(--surface2)';
+    enBtn.style.color = l==='en' ? '#fff' : 'var(--text2)';
+  }
+}
+
+function switchTab(tab){
+  ['items','add','settings'].forEach(t=>{
+    document.getElementById('screen-'+t).classList.toggle('active',t===tab);
+    document.getElementById('tab-'+t).classList.toggle('active',t===tab);
+  });
+  if(tab==='add'){renderFreezerSelect();renderCatSelect('a-cat',document.getElementById('a-cat').value||'meat');}
+  if(tab==='settings')updateFbStatus();
+}
+function savePrefs(){const lang=prefs.lang||'is';prefs.warnDays=parseInt(document.getElementById('warn-threshold').value);prefs.lang=lang;persist();}
+function showNotif(msg){const n=document.getElementById('notif');n.textContent=msg;n.classList.add('show');setTimeout(()=>n.classList.remove('show'),2200);}
+
+document.getElementById('a-frozen').value=TODAY.toISOString().slice(0,10);
+document.getElementById('a-frozen').max=TODAY.toISOString().slice(0,10);
+load();
+document.getElementById('warn-threshold').value=prefs.warnDays;
+render();
+applyLang();
+
+// Wait for Firebase module to initialize
+document.addEventListener('fb_ready', () => {
+  updateFbStatus();
+  // Hook up real-time listener so changes from other devices appear instantly
+  window.fbOnChange = applyCloudData;
+});
+</script>
+</body>
+</html>
